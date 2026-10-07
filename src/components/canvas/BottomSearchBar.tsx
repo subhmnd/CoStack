@@ -20,11 +20,13 @@ export function BottomSearchBar() {
     if (!clean) {
       setSuggestions([]);
       setIsLoading(false);
+      setIsOpen(false);
       return;
     }
 
     let isCurrent = true;
     setIsLoading(true);
+    setIsOpen(true);
 
     const timeout = setTimeout(async () => {
       try {
@@ -34,6 +36,7 @@ export function BottomSearchBar() {
           if (isCurrent) {
             setSuggestions(data.results || []);
             setSelectedIndex(0);
+            setIsOpen(true);
           }
         }
       } catch (err) {
@@ -43,7 +46,7 @@ export function BottomSearchBar() {
           setIsLoading(false);
         }
       }
-    }, 220);
+    }, 200);
 
     return () => {
       isCurrent = false;
@@ -96,17 +99,17 @@ export function BottomSearchBar() {
   return (
     <div
       ref={containerRef}
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-full max-w-xl px-4"
+      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-xl px-4"
     >
-      {/* Suggestions Floating Above Input showing ONLY Name, Version, Source */}
-      {isOpen && (suggestions.length > 0 || isLoading) && (
+      {/* Suggestions Floating Above Input */}
+      {isOpen && searchQuery.trim().length > 0 && (
         <div className="mb-2 max-h-72 w-full overflow-y-auto rounded-2xl border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl backdrop-blur-xl dark:border-zinc-800/90 dark:bg-black/95 transition-all animate-in fade-in slide-in-from-bottom-2">
           {isLoading && suggestions.length === 0 ? (
             <div className="flex items-center justify-center gap-2 py-4 text-xs text-zinc-400">
               <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-600" />
               <span>Searching web...</span>
             </div>
-          ) : (
+          ) : suggestions.length > 0 ? (
             suggestions.map((item, idx) => (
               <button
                 key={`${item.id}-${idx}`}
@@ -138,17 +141,39 @@ export function BottomSearchBar() {
                 )}
               </button>
             ))
+          ) : !isLoading && (
+            <div className="flex flex-col items-center justify-center py-3.5 px-4 text-center">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
+                No web packages matched &quot;{searchQuery.trim()}&quot;
+              </p>
+              <button
+                onClick={() =>
+                  handleSelectSuggestion({
+                    id: searchQuery.toLowerCase().replace(/[^a-z0-9_-]/g, ""),
+                    name: searchQuery.trim(),
+                    version: "latest",
+                    source: `${searchQuery.toLowerCase().replace(/[^a-z0-9_-]/g, "")}.org`,
+                    sourceUrl: "",
+                  })
+                }
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium transition-colors shadow-sm"
+              >
+                + Add package &quot;{searchQuery.trim()}&quot; to stack
+              </button>
+            </div>
           )}
         </div>
       )}
 
-      {/* Main Search Input: Clean, sleek, no awkward Enter box */}
+      {/* Main Search Input */}
       <div className="relative flex items-center rounded-2xl border border-zinc-200/80 bg-white/95 shadow-xl backdrop-blur-md dark:border-zinc-800/80 dark:bg-black/95 transition-all focus-within:border-purple-600 focus-within:ring-2 focus-within:ring-purple-600/20">
         <input
           ref={inputRef}
           type="text"
           value={searchQuery}
-          onFocus={() => setIsOpen(true)}
+          onFocus={() => {
+            if (searchQuery.trim().length > 0) setIsOpen(true);
+          }}
           onChange={(e) => {
             setSearchQuery(e.target.value);
             setIsOpen(true);

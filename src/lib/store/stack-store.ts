@@ -24,7 +24,6 @@ export interface StackCardData extends Record<string, unknown> {
   category?: string;
   hasConflict?: boolean;
   conflictReason?: string;
-  status: "Running" | "Configured" | "Healthy" | "Idle" | string;
   command?: string;
 }
 
@@ -197,7 +196,6 @@ export const useStackStore = create<StackStore>((set, get) => ({
         source: item.source || "",
         sourceUrl: item.sourceUrl || "",
         category: item.category || (slugId.includes("panel") ? "panel" : "application"),
-        status: "Running",
       },
     };
 
@@ -277,7 +275,6 @@ export const useStackStore = create<StackStore>((set, get) => ({
           source: `${slugId}.com`,
           sourceUrl: "",
           category: slugId.includes("panel") ? "panel" : "application",
-          status: "Running",
         },
       });
 

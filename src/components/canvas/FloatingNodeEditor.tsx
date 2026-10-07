@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
-import { X, Trash2, Copy, Plus, Terminal, Globe, AlertTriangle } from "lucide-react";
-import { useStackStore, StackCardData } from "@/lib/store/stack-store";
+import React from "react";
+import { X, Trash2, Copy, Terminal, AlertTriangle } from "lucide-react";
+import { useStackStore } from "@/lib/store/stack-store";
 
 export function FloatingNodeEditor() {
   const { nodes, selectedNodeId, setSelectedNodeId, updateNodeData, deleteNode, duplicateNode } =
@@ -10,34 +10,12 @@ export function FloatingNodeEditor() {
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
-  const [newEnvKey, setNewEnvKey] = useState("");
-  const [newEnvVal, setNewEnvVal] = useState("");
-
   if (!selectedNode) return null;
 
   const data = selectedNode.data;
   const versionList = Array.from(
-    new Set([data.version, ...(data.versions || []), "latest", "stable"].filter(Boolean) as string[])
+    new Set([data.version, ...(data.versions || []), "latest", "stable", "lts"].filter(Boolean) as string[])
   );
-
-  const handleAddEnv = () => {
-    if (!newEnvKey.trim()) return;
-    const currentEnv = data.env || {};
-    updateNodeData(selectedNode.id, {
-      env: {
-        ...currentEnv,
-        [newEnvKey.trim().toUpperCase()]: newEnvVal.trim(),
-      },
-    });
-    setNewEnvKey("");
-    setNewEnvVal("");
-  };
-
-  const handleRemoveEnv = (key: string) => {
-    const currentEnv: Record<string, string> = { ...((data.env as Record<string, string>) || {}) };
-    delete currentEnv[key];
-    updateNodeData(selectedNode.id, { env: currentEnv });
-  };
 
   return (
     <div className="absolute top-20 right-6 z-40 w-80 rounded-2xl border border-zinc-200 bg-white/95 p-4 shadow-xl backdrop-blur-md dark:border-zinc-800 dark:bg-black/95 transition-all animate-in fade-in zoom-in-95">
@@ -84,23 +62,42 @@ export function FloatingNodeEditor() {
           />
         </div>
 
-        {/* Version Dropdown & Source */}
+        {/* Version Editable Input & Source */}
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="block text-[11px] font-medium text-zinc-500 mb-1">
               Version
             </label>
-            <select
-              value={data.version || versionList[0] || "latest"}
+            <input
+              type="text"
+              list={`versions-${selectedNode.id}`}
+              value={data.version || ""}
+              placeholder="e.g. latest, 24.0"
               onChange={(e) => updateNodeData(selectedNode.id, { version: e.target.value })}
-              className="w-full rounded-lg border border-purple-500/40 bg-zinc-50 px-2.5 py-1.5 font-mono text-xs text-zinc-900 focus:border-purple-600 focus:outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 cursor-pointer"
-            >
+              className="w-full rounded-lg border border-purple-500/40 bg-zinc-50 px-2.5 py-1.5 font-mono text-xs text-zinc-900 focus:border-purple-600 focus:outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+            />
+            <datalist id={`versions-${selectedNode.id}`}>
               {versionList.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
+                <option key={v} value={v} />
               ))}
-            </select>
+            </datalist>
+            {/* Quick Version Chips */}
+            <div className="flex gap-1 mt-1.5 flex-wrap">
+              {["latest", "stable", "lts"].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => updateNodeData(selectedNode.id, { version: preset })}
+                  className={`text-[10px] font-mono px-1.5 py-0.5 rounded border transition-colors ${
+                    data.version === preset
+                      ? "border-purple-500 bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 dark:border-purple-800 font-semibold"
+                      : "border-zinc-200 text-zinc-500 hover:border-zinc-300 dark:border-zinc-800 dark:text-zinc-400"
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
           </div>
           <div>
             <label className="block text-[11px] font-medium text-zinc-500 mb-1">
@@ -116,27 +113,6 @@ export function FloatingNodeEditor() {
           </div>
         </div>
 
-        {/* Status */}
-        <div>
-          <label className="block text-[11px] font-medium text-zinc-500 mb-1">
-            Status
-          </label>
-          <select
-            value={data.status}
-            onChange={(e) =>
-              updateNodeData(selectedNode.id, {
-                status: e.target.value as StackCardData["status"],
-              })
-            }
-            className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 font-medium text-zinc-900 focus:border-purple-600 focus:outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
-          >
-            <option value="Running">● Running</option>
-            <option value="Configured">● Configured</option>
-            <option value="Healthy">● Healthy</option>
-            <option value="Idle">● Idle</option>
-          </select>
-        </div>
-
         {/* Custom Shell Command */}
         <div>
           <label className="flex items-center gap-1 text-[11px] font-medium text-zinc-500 mb-1">
@@ -149,58 +125,6 @@ export function FloatingNodeEditor() {
             onChange={(e) => updateNodeData(selectedNode.id, { command: e.target.value })}
             className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 font-mono text-[11px] text-zinc-900 focus:border-purple-600 focus:outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
           />
-        </div>
-
-        {/* Environment Variables */}
-        <div>
-          <label className="block text-[11px] font-medium text-zinc-500 mb-1">
-            Environment Variables
-          </label>
-          <div className="space-y-1 mb-2 max-h-24 overflow-y-auto">
-            {data.env && Object.keys(data.env).length > 0 ? (
-              Object.entries(data.env).map(([k, v]) => (
-                <div
-                  key={k}
-                  className="flex items-center justify-between rounded bg-zinc-100 px-2 py-1 font-mono text-[10px] dark:bg-zinc-900"
-                >
-                  <span className="text-zinc-700 dark:text-zinc-300">
-                    {k}={v}
-                  </span>
-                  <button
-                    onClick={() => handleRemoveEnv(k)}
-                    className="text-zinc-400 hover:text-red-500 ml-1"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))
-            ) : (
-              <span className="text-[10px] text-zinc-400 italic">No variables set</span>
-            )}
-          </div>
-
-          <div className="flex gap-1">
-            <input
-              type="text"
-              placeholder="KEY"
-              value={newEnvKey}
-              onChange={(e) => setNewEnvKey(e.target.value)}
-              className="w-1/2 rounded border border-zinc-200 bg-zinc-50 px-2 py-1 font-mono text-[10px] dark:border-zinc-800 dark:bg-zinc-900"
-            />
-            <input
-              type="text"
-              placeholder="VALUE"
-              value={newEnvVal}
-              onChange={(e) => setNewEnvVal(e.target.value)}
-              className="w-1/2 rounded border border-zinc-200 bg-zinc-50 px-2 py-1 font-mono text-[10px] dark:border-zinc-800 dark:bg-zinc-900"
-            />
-            <button
-              onClick={handleAddEnv}
-              className="rounded bg-zinc-900 px-2 py-1 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-black dark:hover:bg-zinc-200"
-            >
-              <Plus className="h-3 w-3" />
-            </button>
-          </div>
         </div>
       </div>
 

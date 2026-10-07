@@ -112,10 +112,10 @@ export const StackCardNode = memo(({ id, data, selected }: NodeProps<StackNode>)
         </div>
       </div>
 
-      {/* Source & Status - Clean, Minimal */}
+      {/* Source & Conflict - Clean, Minimal */}
       <div className="mt-3.5 pt-2 border-t border-zinc-100 dark:border-zinc-900 flex items-center justify-between text-xs">
         {data.source ? (
-          <div className="flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 font-mono truncate max-w-[120px]">
+          <div className="flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 font-mono truncate max-w-[150px]">
             <Globe className="h-3 w-3 text-zinc-400 flex-shrink-0" />
             <span className="truncate">{data.source}</span>
           </div>
@@ -123,7 +123,7 @@ export const StackCardNode = memo(({ id, data, selected }: NodeProps<StackNode>)
           <span />
         )}
 
-        {data.hasConflict ? (
+        {data.hasConflict && (
           <div className="flex items-center gap-1 text-[11px] font-semibold text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-950/60 px-1.5 py-0.5 rounded border border-red-200 dark:border-red-800">
             <span className="relative flex h-1.5 w-1.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
@@ -131,18 +131,10 @@ export const StackCardNode = memo(({ id, data, selected }: NodeProps<StackNode>)
             </span>
             <span>⚠ Conflict</span>
           </div>
-        ) : (
-          <div className="flex items-center gap-1 text-[11px] font-medium text-zinc-700 dark:text-zinc-300">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-            </span>
-            <span>{data.status || "Running"}</span>
-          </div>
         )}
       </div>
 
-      {/* Visible conflict alert below status */}
+      {/* Visible conflict alert below source */}
       {data.hasConflict && (
         <div className="mt-2 text-[10px] text-red-600 dark:text-red-400 font-medium bg-red-50 dark:bg-red-950/40 px-2 py-1 rounded border border-red-200 dark:border-red-800 leading-tight">
           {data.conflictReason || "Conflict: Incompatible with existing services"}
