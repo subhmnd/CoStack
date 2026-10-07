@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { X, Trash2, Copy, Plus, Terminal } from "lucide-react";
+import { X, Trash2, Copy, Plus, Terminal, Globe } from "lucide-react";
 import { useStackStore, StackCardData } from "@/lib/store/stack-store";
 
 export function FloatingNodeEditor() {
@@ -68,7 +68,7 @@ export function FloatingNodeEditor() {
           />
         </div>
 
-        {/* Version & Port */}
+        {/* Version & Source */}
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="block text-[11px] font-medium text-zinc-500 mb-1">
@@ -83,38 +83,15 @@ export function FloatingNodeEditor() {
           </div>
           <div>
             <label className="block text-[11px] font-medium text-zinc-500 mb-1">
-              Port
+              Source
             </label>
             <input
-              type="number"
-              value={data.port || 80}
-              onChange={(e) =>
-                updateNodeData(selectedNode.id, { port: parseInt(e.target.value, 10) || 80 })
-              }
+              type="text"
+              value={data.source || ""}
+              placeholder="e.g. aapanel.com"
+              onChange={(e) => updateNodeData(selectedNode.id, { source: e.target.value })}
               className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 font-mono text-zinc-900 focus:border-purple-600 focus:outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
             />
-          </div>
-        </div>
-
-        {/* Runtime selection */}
-        <div>
-          <label className="block text-[11px] font-medium text-zinc-500 mb-1">
-            Runtime Mode
-          </label>
-          <div className="grid grid-cols-3 gap-1 rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
-            {(["Native", "Container", "Binary"] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => updateNodeData(selectedNode.id, { runtime: mode })}
-                className={`py-1 rounded text-[11px] font-medium transition-all ${
-                  data.runtime === mode
-                    ? "bg-white text-zinc-950 shadow-sm dark:bg-black dark:text-white"
-                    : "text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200"
-                }`}
-              >
-                {mode}
-              </button>
-            ))}
           </div>
         </div>
 
@@ -147,7 +124,7 @@ export function FloatingNodeEditor() {
           <textarea
             rows={2}
             value={data.command || ""}
-            placeholder="e.g. sh install.sh or custom commands"
+            placeholder="e.g. curl -fsSL ... | sh"
             onChange={(e) => updateNodeData(selectedNode.id, { command: e.target.value })}
             className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 font-mono text-[11px] text-zinc-900 focus:border-purple-600 focus:outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
           />

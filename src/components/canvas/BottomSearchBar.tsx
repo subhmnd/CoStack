@@ -1,21 +1,45 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { CornerDownLeft, Sparkles, Layers } from "lucide-react";
+import { Globe, Tag, Loader2 } from "lucide-react";
 import { useStackStore } from "@/lib/store/stack-store";
-import { generateSearchSuggestions, SearchSuggestion } from "@/lib/stack-parser";
+import { SearchResultItem } from "@/lib/stack-parser";
 
 export function BottomSearchBar() {
-  const { addSoftwareStack, searchQuery, setSearchQuery } = useStackStore();
+  const { addNodeFromSearch, searchQuery, setSearchQuery } = useStackStore();
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [suggestions, setSuggestions] = useState<SearchResultItem[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const suggestions: SearchSuggestion[] = generateSearchSuggestions(searchQuery);
-
+  // Live web search fetching with debounce
   useEffect(() => {
-    setSelectedIndex(0);
+    const clean = searchQuery.trim();
+    if (!clean) {
+      setSuggestions([]);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    const timeout = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(clean)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSuggestions(data.results || []);
+          setSelectedIndex(0);
+        }
+      } catch (err) {
+        console.error("Live web search error:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    }, 200);
+
+    return () => clearTimeout(timeout);
   }, [searchQuery]);
 
   // Click outside listener
@@ -29,8 +53,8 @@ export function BottomSearchBar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleSelectSuggestion = (suggestion: SearchSuggestion) => {
-    addSoftwareStack(suggestion.items);
+  const handleSelectSuggestion = (item: SearchResultItem) => {
+    addNodeFromSearch(item);
     setSearchQuery("");
     setIsOpen(false);
   };
@@ -47,13 +71,13 @@ export function BottomSearchBar() {
       if (suggestions.length > 0 && suggestions[selectedIndex]) {
         handleSelectSuggestion(suggestions[selectedIndex]);
       } else if (searchQuery.trim()) {
-        const directItems = searchQuery
-          .split(/[+,&]/)
-          .map((s) => s.trim())
-          .filter(Boolean);
-        addSoftwareStack(directItems);
-        setSearchQuery("");
-        setIsOpen(false);
+        handleSelectSuggestion({
+          id: searchQuery.toLowerCase().replace(/[^a-z0-9_-]/g, ""),
+          name: searchQuery.trim(),
+          version: "latest",
+          source: `${searchQuery.toLowerCase().replace(/[^a-z0-9_-]/g, "")}.org`,
+          sourceUrl: "",
+        });
       }
     } else if (e.key === "Escape") {
       setIsOpen(false);
@@ -65,44 +89,51 @@ export function BottomSearchBar() {
       ref={containerRef}
       className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-full max-w-xl px-4"
     >
-      {/* Suggestions Floating Above Input */}
-      {isOpen && suggestions.length > 0 && (
+      {/* Suggestions Floating Above Input showing ONLY Name, Version, Source */}
+      {isOpen && (suggestions.length > 0 || isLoading) && (
         <div className="mb-2 max-h-72 w-full overflow-y-auto rounded-2xl border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl backdrop-blur-xl dark:border-zinc-800/90 dark:bg-black/95 transition-all animate-in fade-in slide-in-from-bottom-2">
-          <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-            Suggested Stacks
-          </div>
-          {suggestions.map((suggestion, idx) => (
-            <button
-              key={suggestion.id}
-              onClick={() => handleSelectSuggestion(suggestion)}
-              onMouseEnter={() => setSelectedIndex(idx)}
-              className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-xs transition-colors ${
-                selectedIndex === idx
-                  ? "bg-zinc-100 text-zinc-950 dark:bg-zinc-900 dark:text-zinc-50"
-                  : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-900/50"
-              }`}
-            >
-              <div className="flex items-center gap-2.5 truncate">
-                <Layers className="h-3.5 w-3.5 text-purple-600 flex-shrink-0" />
-                <div>
-                  <div className="font-medium text-zinc-900 dark:text-zinc-100">
-                    {suggestion.title}
-                  </div>
-                  <div className="text-[11px] text-zinc-500 truncate">
-                    {suggestion.description}
-                  </div>
+          {isLoading && suggestions.length === 0 ? (
+            <div className="flex items-center justify-center gap-2 py-4 text-xs text-zinc-400">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-600" />
+              <span>Searching web...</span>
+            </div>
+          ) : (
+            suggestions.map((item, idx) => (
+              <button
+                key={`${item.id}-${idx}`}
+                onClick={() => handleSelectSuggestion(item)}
+                onMouseEnter={() => setSelectedIndex(idx)}
+                className={`flex w-full items-center justify-between rounded-xl px-3.5 py-2.5 text-left transition-colors ${
+                  selectedIndex === idx
+                    ? "bg-zinc-100 text-zinc-950 dark:bg-zinc-900 dark:text-zinc-50"
+                    : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-900/50"
+                }`}
+              >
+                {/* Left: Name and Version */}
+                <div className="flex items-center gap-2.5 truncate">
+                  <span className="font-medium text-sm text-zinc-950 dark:text-zinc-50 truncate">
+                    {item.name}
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800">
+                    <Tag className="h-2.5 w-2.5 text-purple-500" />
+                    {item.version}
+                  </span>
                 </div>
-              </div>
-              <div className="flex items-center gap-1 text-[10px] text-zinc-400 font-mono">
-                <span>Add</span>
-                <CornerDownLeft className="h-2.5 w-2.5" />
-              </div>
-            </button>
-          ))}
+
+                {/* Right: Official Source */}
+                {item.source && (
+                  <div className="flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                    <Globe className="h-3 w-3 text-zinc-400" />
+                    <span className="truncate max-w-[150px]">{item.source}</span>
+                  </div>
+                )}
+              </button>
+            ))
+          )}
         </div>
       )}
 
-      {/* Main Search Input */}
+      {/* Main Search Input: Clean, sleek, no awkward Enter box */}
       <div className="relative flex items-center rounded-2xl border border-zinc-200/80 bg-white/95 shadow-xl backdrop-blur-md dark:border-zinc-800/80 dark:bg-black/95 transition-all focus-within:border-purple-600 focus-within:ring-2 focus-within:ring-purple-600/20">
         <input
           ref={inputRef}
@@ -114,15 +145,15 @@ export function BottomSearchBar() {
             setIsOpen(true);
           }}
           onKeyDown={handleKeyDown}
-          placeholder="Search stack (e.g. Nextcloud, WordPress + MariaDB)..."
-          className="w-full bg-transparent px-4 py-3.5 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none dark:text-zinc-100 dark:placeholder-zinc-600 font-normal"
+          placeholder="Search stack..."
+          className="w-full bg-transparent px-5 py-3.5 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none dark:text-zinc-100 dark:placeholder-zinc-600 font-normal tracking-tight"
         />
 
-        <div className="flex items-center gap-2 pr-3">
-          <kbd className="hidden sm:inline-flex items-center gap-0.5 rounded border border-zinc-200 bg-zinc-100 px-1.5 py-0.5 text-[10px] font-mono text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-            Enter ↵
-          </kbd>
-        </div>
+        {isLoading && (
+          <div className="pr-4">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-600" />
+          </div>
+        )}
       </div>
     </div>
   );

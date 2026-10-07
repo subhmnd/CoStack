@@ -11,14 +11,23 @@ import {
   addEdge,
   MarkerType,
 } from "@xyflow/react";
-import { ParsedSoftwareItem, createSoftwareNodeData } from "@/lib/stack-parser";
 import { generateStackSlug } from "@/lib/utils";
 
-export interface StackCardData extends ParsedSoftwareItem {
+export interface StackCardData extends Record<string, unknown> {
+  id: string;
+  name: string;
   label: string;
+  version: string;
+  source: string;
+  sourceUrl?: string;
+  status: "Running" | "Configured" | "Healthy" | "Idle";
+  port?: number;
+  runtime?: "Native" | "Container" | "Binary";
+  env?: Record<string, string>;
+  command?: string;
 }
 
-export type StackNode = Node<StackCardData>;
+export type StackNode = Node<StackCardData, "stackCard">;
 
 export interface StackStore {
   slug: string;
@@ -40,8 +49,13 @@ export interface StackStore {
   onEdgesChange: OnEdgesChange;
   onConnect: OnConnect;
 
+  addNodeFromSearch: (item: {
+    name: string;
+    version: string;
+    source: string;
+    sourceUrl?: string;
+  }) => void;
   addSoftwareStack: (itemNames: string[]) => void;
-  addSingleNode: (name: string, position?: { x: number; y: number }) => void;
   updateNodeData: (id: string, data: Partial<StackCardData>) => void;
   deleteNode: (id: string) => void;
   duplicateNode: (id: string) => void;
@@ -98,6 +112,64 @@ export const useStackStore = create<StackStore>((set, get) => ({
     });
   },
 
+  addNodeFromSearch: (item) => {
+    const slugId = item.name.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+    const nodeId = `node-${slugId}-${Date.now()}`;
+    const count = get().nodes.length;
+    const spacingX = 260;
+    const startX = 240 + count * spacingX;
+    const startY = 220;
+
+    const newNode: StackNode = {
+      id: nodeId,
+      type: "stackCard",
+      position: { x: startX, y: startY },
+      data: {
+        id: slugId,
+        name: item.name,
+        label: item.name,
+        version: item.version || "latest",
+        source: item.source || "",
+        sourceUrl: item.sourceUrl || "",
+        status: "Running",
+        port: 80,
+        runtime: "Native",
+        env: {},
+      },
+    };
+
+    const newEdges = [...get().edges];
+    // Connect to previous node if available
+    if (count > 0) {
+      const prevNode = get().nodes[count - 1];
+      newEdges.push({
+        id: `edge-${prevNode.id}-${nodeId}`,
+        source: prevNode.id,
+        target: nodeId,
+        sourceHandle: "right",
+        targetHandle: "left",
+        type: "smoothstep",
+        animated: true,
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          width: 16,
+          height: 16,
+          color: "#7c3aed",
+        },
+        style: {
+          strokeWidth: 2,
+          stroke: "#7c3aed",
+        },
+      });
+    }
+
+    set({
+      nodes: [...get().nodes, newNode],
+      edges: newEdges,
+      searchQuery: "",
+    });
+  },
+
   addSoftwareStack: (itemNames: string[]) => {
     if (!itemNames || itemNames.length === 0) return;
 
@@ -107,28 +179,38 @@ export const useStackStore = create<StackStore>((set, get) => ({
     const newEdges: Edge[] = [];
 
     const spacingX = 260;
-    const spacingY = 0;
-    const startX = Math.max(80, (window?.innerWidth || 1000) / 2 - (itemNames.length * spacingX) / 2);
+    const startX = Math.max(
+      80,
+      (typeof window !== "undefined" ? window.innerWidth : 1000) / 2 - (itemNames.length * spacingX) / 2
+    );
     const startY = 240;
 
     itemNames.forEach((name, i) => {
-      const nodeData = createSoftwareNodeData(name);
-      const nodeId = `node-${nodeData.id}-${i}`;
+      const cleanName = name.trim();
+      const slugId = cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+      const nodeId = `node-${slugId}-${i}`;
 
       newNodes.push({
         id: nodeId,
         type: "stackCard",
         position: {
           x: startX + i * spacingX,
-          y: startY + i * spacingY,
+          y: startY,
         },
         data: {
-          ...nodeData,
-          label: nodeData.name,
+          id: slugId,
+          name: cleanName,
+          label: cleanName,
+          version: "latest",
+          source: `${slugId}.org`,
+          sourceUrl: "",
+          status: "Running",
+          port: 80,
+          runtime: "Native",
+          env: {},
         },
       });
 
-      // User relationship: Link sequential items (e.g., App ──► DB)
       if (i > 0) {
         const prevNodeId = newNodes[i - 1].id;
         newEdges.push({
@@ -158,30 +240,6 @@ export const useStackStore = create<StackStore>((set, get) => ({
       stackName: itemNames.join(" + "),
       nodes: newNodes,
       edges: newEdges,
-      searchQuery: "",
-    });
-  },
-
-  addSingleNode: (name: string, position) => {
-    const nodeData = createSoftwareNodeData(name);
-    const nodeId = `node-${nodeData.id}-${Date.now()}`;
-    const defaultPos = position || {
-      x: 300 + Math.random() * 80,
-      y: 200 + Math.random() * 80,
-    };
-
-    const newNode: StackNode = {
-      id: nodeId,
-      type: "stackCard",
-      position: defaultPos,
-      data: {
-        ...nodeData,
-        label: nodeData.name,
-      },
-    };
-
-    set({
-      nodes: [...get().nodes, newNode],
       searchQuery: "",
     });
   },

@@ -2,18 +2,11 @@
 
 import React, { memo } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
-import { Copy, Trash2, Settings2 } from "lucide-react";
-import { useStackStore, StackCardData } from "@/lib/store/stack-store";
+import { Copy, Trash2, Globe } from "lucide-react";
+import { useStackStore, StackNode } from "@/lib/store/stack-store";
 
-export const StackCardNode = memo(({ id, data, selected }: NodeProps<StackCardData>) => {
+export const StackCardNode = memo(({ id, data, selected }: NodeProps<StackNode>) => {
   const { setSelectedNodeId, deleteNode, duplicateNode } = useStackStore();
-
-  const statusColor =
-    data.status === "Running" || data.status === "Healthy"
-      ? "text-emerald-500 fill-emerald-500"
-      : data.status === "Configured"
-      ? "text-purple-500 fill-purple-500"
-      : "text-zinc-400 fill-zinc-400";
 
   return (
     <div
@@ -24,19 +17,19 @@ export const StackCardNode = memo(({ id, data, selected }: NodeProps<StackCardDa
           : "border-zinc-200 hover:border-zinc-400 dark:border-zinc-800 dark:hover:border-zinc-700"
       }`}
     >
-      {/* 4 Handles for universal user-controlled directional connections */}
+      {/* 4 Handles for universal directional connections */}
       {/* TOP */}
       <Handle
         type="target"
         position={Position.Top}
         id="top-target"
-        className="!w-2.5 !h-2.5 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
+        className="!w-2 !h-2 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
       />
       <Handle
         type="source"
         position={Position.Top}
         id="top"
-        className="!w-2.5 !h-2.5 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
+        className="!w-2 !h-2 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
       />
 
       {/* RIGHT */}
@@ -44,13 +37,13 @@ export const StackCardNode = memo(({ id, data, selected }: NodeProps<StackCardDa
         type="source"
         position={Position.Right}
         id="right"
-        className="!w-2.5 !h-2.5 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
+        className="!w-2 !h-2 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
       />
       <Handle
         type="target"
         position={Position.Right}
         id="right-target"
-        className="!w-2.5 !h-2.5 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
+        className="!w-2 !h-2 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
       />
 
       {/* BOTTOM */}
@@ -58,13 +51,13 @@ export const StackCardNode = memo(({ id, data, selected }: NodeProps<StackCardDa
         type="source"
         position={Position.Bottom}
         id="bottom"
-        className="!w-2.5 !h-2.5 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
+        className="!w-2 !h-2 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
       />
       <Handle
         type="target"
         position={Position.Bottom}
         id="bottom-target"
-        className="!w-2.5 !h-2.5 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
+        className="!w-2 !h-2 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
       />
 
       {/* LEFT */}
@@ -72,22 +65,22 @@ export const StackCardNode = memo(({ id, data, selected }: NodeProps<StackCardDa
         type="target"
         position={Position.Left}
         id="left"
-        className="!w-2.5 !h-2.5 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
+        className="!w-2 !h-2 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
       />
       <Handle
         type="source"
         position={Position.Left}
         id="left-source"
-        className="!w-2.5 !h-2.5 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
+        className="!w-2 !h-2 !bg-zinc-800 dark:!bg-zinc-200 !border-2 !border-white dark:!border-black transition-transform hover:!scale-125 hover:!bg-purple-600"
       />
 
-      {/* Card Header & Content */}
+      {/* Card Header */}
       <div className="flex items-start justify-between">
         <div>
-          <div className="font-semibold text-sm tracking-tight text-zinc-900 dark:text-zinc-100">
+          <div className="font-semibold text-sm tracking-tight text-zinc-950 dark:text-zinc-50">
             {data.name}
           </div>
-          <div className="text-xs font-mono text-zinc-500 dark:text-zinc-400">
+          <div className="text-xs font-mono text-zinc-500 dark:text-zinc-400 mt-0.5">
             {data.version || "latest"}
           </div>
         </div>
@@ -117,21 +110,24 @@ export const StackCardNode = memo(({ id, data, selected }: NodeProps<StackCardDa
         </div>
       </div>
 
-      {/* Port & Runtime Details */}
-      <div className="mt-3 flex items-center justify-between text-[11px] text-zinc-400 dark:text-zinc-500">
-        <span className="font-mono">:{data.port || 80}</span>
-        <span className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 font-medium">
-          {data.runtime || "Native"}
-        </span>
-      </div>
+      {/* Source & Status - Clean, Minimal */}
+      <div className="mt-3.5 pt-2 border-t border-zinc-100 dark:border-zinc-900 flex items-center justify-between text-xs">
+        {data.source ? (
+          <div className="flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 font-mono truncate max-w-[120px]">
+            <Globe className="h-3 w-3 text-zinc-400 flex-shrink-0" />
+            <span className="truncate">{data.source}</span>
+          </div>
+        ) : (
+          <span />
+        )}
 
-      {/* Status indicator */}
-      <div className="mt-2.5 pt-2 border-t border-zinc-100 dark:border-zinc-900 flex items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300">
-        <span className="relative flex h-2 w-2">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-        </span>
-        <span className="text-[11px] font-medium">{data.status || "Running"}</span>
+        <div className="flex items-center gap-1 text-[11px] font-medium text-zinc-700 dark:text-zinc-300">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+          </span>
+          <span>{data.status || "Running"}</span>
+        </div>
       </div>
     </div>
   );

@@ -1,15 +1,16 @@
 import { stringify } from "yaml";
 
 export interface StackNodeData {
-  techId: string;
+  id?: string;
   name: string;
   version: string;
-  status: "configured" | "running" | "healthy" | "idle";
+  source?: string;
+  sourceUrl?: string;
+  status: "Running" | "Configured" | "Healthy" | "Idle" | string;
   port?: number;
   env?: Record<string, string>;
-  installType?: "docker" | "system";
-  dockerImage?: string;
-  healthCheckCmd?: string;
+  runtime?: "Native" | "Container" | "Binary";
+  command?: string;
   officialDocsUrl?: string;
   officialRepoUrl?: string;
 }

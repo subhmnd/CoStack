@@ -112,12 +112,14 @@ export function StackViewerClient({ slug, manifest, jsonString, yamlString, bash
                     {node.data.version || "latest"}
                   </div>
                 </div>
-                <span className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-900 text-[10px] font-medium text-zinc-600 dark:text-zinc-400">
-                  {node.data.runtime || "Native"}
-                </span>
+                {node.data.source && (
+                  <span className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-900 text-[10px] font-mono text-zinc-600 dark:text-zinc-400 truncate max-w-[120px]">
+                    {node.data.source}
+                  </span>
+                )}
               </div>
               <div className="mt-3 pt-2 border-t border-zinc-100 dark:border-zinc-900 flex items-center justify-between text-[11px] text-zinc-500">
-                <span>Port {node.data.port || 80}</span>
+                <span className="font-mono text-zinc-400">{node.data.version || "latest"}</span>
                 <span className="text-emerald-600 dark:text-emerald-400 font-medium">● Verified</span>
               </div>
             </div>
