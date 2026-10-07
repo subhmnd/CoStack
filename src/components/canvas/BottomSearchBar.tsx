@@ -23,23 +23,32 @@ export function BottomSearchBar() {
       return;
     }
 
+    let isCurrent = true;
     setIsLoading(true);
+
     const timeout = setTimeout(async () => {
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(clean)}`);
-        if (res.ok) {
+        if (res.ok && isCurrent) {
           const data = await res.json();
-          setSuggestions(data.results || []);
-          setSelectedIndex(0);
+          if (isCurrent) {
+            setSuggestions(data.results || []);
+            setSelectedIndex(0);
+          }
         }
       } catch (err) {
         console.error("Live web search error:", err);
       } finally {
-        setIsLoading(false);
+        if (isCurrent) {
+          setIsLoading(false);
+        }
       }
-    }, 200);
+    }, 220);
 
-    return () => clearTimeout(timeout);
+    return () => {
+      isCurrent = false;
+      clearTimeout(timeout);
+    };
   }, [searchQuery]);
 
   // Click outside listener
