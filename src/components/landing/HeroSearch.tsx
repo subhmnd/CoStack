@@ -53,15 +53,20 @@ export function HeroSearch() {
             setSuggestions(data.results || []);
             setSelectedIndex(0);
           }
+        } else if (isCurrent) {
+          setSuggestions([]);
         }
       } catch (err) {
         console.error("Search fetch error:", err);
+        if (isCurrent) {
+          setSuggestions([]);
+        }
       } finally {
         if (isCurrent) {
           setIsLoading(false);
         }
       }
-    }, 220);
+    }, 200);
 
     return () => {
       isCurrent = false;
@@ -144,14 +149,14 @@ export function HeroSearch() {
         </form>
 
         {/* Live Search Suggestions Dropdown showing Name, Version, Source */}
-        {isOpen && (suggestions.length > 0 || isLoading) && (
+        {isOpen && query.trim().length > 0 && (
           <div className="absolute top-full left-0 right-0 mt-2 z-50 max-h-72 w-full overflow-y-auto rounded-2xl border border-zinc-200/90 bg-white/95 p-1.5 shadow-2xl backdrop-blur-xl dark:border-zinc-800/90 dark:bg-black/95 transition-all animate-in fade-in slide-in-from-top-2">
             {isLoading && suggestions.length === 0 ? (
               <div className="flex items-center justify-center gap-2 py-4 text-xs text-zinc-400">
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-600" />
                 <span>Searching web...</span>
               </div>
-            ) : (
+            ) : suggestions.length > 0 ? (
               suggestions.map((item, idx) => (
                 <button
                   key={`${item.id}-${idx}`}
@@ -184,6 +189,29 @@ export function HeroSearch() {
                   )}
                 </button>
               ))
+            ) : (
+              !isLoading && (
+                <div className="flex flex-col items-center justify-center py-3.5 px-4 text-center">
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
+                    No official packages matched &quot;{query.trim()}&quot;
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleSelect({
+                        id: query.toLowerCase().replace(/[^a-z0-9_-]/g, ""),
+                        name: query.trim(),
+                        version: "latest",
+                        source: `${query.toLowerCase().replace(/[^a-z0-9_-]/g, "")}.com`,
+                        sourceUrl: "",
+                      })
+                    }
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium transition-colors shadow-sm"
+                  >
+                    + Add package &quot;{query.trim()}&quot; to stack
+                  </button>
+                </div>
+              )
             )}
           </div>
         )}

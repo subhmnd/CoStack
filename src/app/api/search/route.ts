@@ -13,6 +13,40 @@ export interface SearchResultItem {
 const searchCache = new Map<string, { data: SearchResultItem[]; timestamp: number }>();
 const CACHE_TTL = 1000 * 60 * 30; // 30 mins
 
+// Exclude tutorial blogs, forums, shopping sites, social media, and encyclopedias
+const JUNK_DOMAINS = [
+  "wikipedia.org",
+  "hostinger.com",
+  "geeksforgeeks.org",
+  "medium.com",
+  "youtube.com",
+  "reddit.com",
+  "quora.com",
+  "stackoverflow.com",
+  "w3schools.com",
+  "ebay.com",
+  "amazon.com",
+  "flickr.com",
+  "pentaxforums.com",
+  "thelensdb.com",
+  "mflenses.com",
+  "facebook.com",
+  "twitter.com",
+  "x.com",
+  "instagram.com",
+  "linkedin.com",
+  "pinterest.com",
+  "bing.com",
+  "google.com",
+  "duckduckgo.com",
+];
+
+// Exclude articles, blog posts, tutorials, reviews, and questions
+const ARTICLE_PATTERNS = [
+  /^(what is|how to|why\b|pros and cons|guide to|introduction to|review|tutorial|top \d+|best \d+)/i,
+  /\b(pros and cons|tutorial|\bvs\b|review|alternative to)/i,
+];
+
 export async function GET(req: NextRequest) {
   const query = req.nextUrl.searchParams.get("q")?.trim() || "";
 
@@ -30,7 +64,7 @@ export async function GET(req: NextRequest) {
   const seenDomains = new Set<string>();
 
   const addResult = (
-    name: string,
+    rawName: string,
     domain: string,
     url: string,
     foundVersion = "latest"
@@ -43,16 +77,29 @@ export async function GET(req: NextRequest) {
       .trim();
 
     if (!cleanDomain || seenDomains.has(cleanDomain)) return;
-    if (
-      cleanDomain.includes("google.") ||
-      cleanDomain.includes("bing.") ||
-      cleanDomain.includes("duckduckgo.")
-    ) {
-      return;
-    }
+    if (JUNK_DOMAINS.some((d) => cleanDomain.includes(d))) return;
     seenDomains.add(cleanDomain);
 
-    const lower = `${name} ${cleanDomain}`.toLowerCase();
+    let cleanName = rawName.split(/[|\-:–]/)[0].trim();
+    const queryClean = query.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const domainBase = cleanDomain.split(".")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+
+    // If official domain directly matches query (e.g. cpanel.net for cpanel, aapanel.com for aapanel)
+    if (domainBase === queryClean || cleanDomain.startsWith(queryClean + ".")) {
+      if (cleanName.length > 25 || !cleanName.toLowerCase().includes(query.toLowerCase())) {
+        cleanName = query.charAt(0).toUpperCase() + query.slice(1);
+      }
+    } else if (
+      cleanName.length > 25 ||
+      cleanName.toLowerCase().includes("home") ||
+      cleanName.toLowerCase().includes("official")
+    ) {
+      const parts = rawName.split(/[|\-:–]/).map((p) => p.trim());
+      const matchPart = parts.find((p) => p.toLowerCase().includes(query.toLowerCase()));
+      cleanName = matchPart || cleanName;
+    }
+
+    const lower = `${cleanName} ${cleanDomain}`.toLowerCase();
     let category: SearchResultItem["category"] = "application";
     if (lower.includes("panel") || lower.includes("hosting")) {
       category = "panel";
@@ -76,7 +123,7 @@ export async function GET(req: NextRequest) {
 
     results.push({
       id: cleanDomain.replace(/[^a-z0-9]/gi, "-"),
-      name,
+      name: cleanName,
       version: foundVersion,
       versions,
       source: cleanDomain,
@@ -85,7 +132,7 @@ export async function GET(req: NextRequest) {
     });
   };
 
-  // Run Bing Web Search and DuckDuckGo Lite concurrently for maximum resilience & speed
+  // Run Bing Web Search and DuckDuckGo Lite concurrently
   const fetchBing = async () => {
     try {
       const bingUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}&setlang=en&mkt=en-US`;
@@ -101,7 +148,7 @@ export async function GET(req: NextRequest) {
       const html = await res.text();
       const algos = html.match(/<li class="b_algo"[\s\S]*?<\/li>/g) || [];
 
-      for (const item of algos.slice(0, 8)) {
+      for (const item of algos) {
         const titleMatch = item.match(/<h2[^>]*><a[^>]*>([\s\S]*?)<\/a><\/h2>/);
         const domainMatch =
           item.match(/<div class="tptt">([^<]+)<\/div>/) ||
@@ -112,21 +159,12 @@ export async function GET(req: NextRequest) {
           const rawTitle = titleMatch[1].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim();
           const rawDomain = domainMatch[1].replace(/<[^>]+>/g, "").trim();
 
-          let cleanName = rawTitle.split(/[|\-:–]/)[0].trim();
-          if (
-            cleanName.length > 25 ||
-            cleanName.toLowerCase().includes("home") ||
-            cleanName.toLowerCase().includes("official")
-          ) {
-            const parts = rawTitle.split(/[|\-:–]/).map((p) => p.trim());
-            const matchPart = parts.find((p) => p.toLowerCase().includes(query.toLowerCase()));
-            cleanName = matchPart || cleanName;
-          }
+          if (ARTICLE_PATTERNS.some((p) => p.test(rawTitle))) continue;
 
           const versionMatch = rawTitle.match(/v?(\d+\.\d+(\.\d+)?)/);
           const parsedVersion = versionMatch ? versionMatch[1] : "latest";
 
-          addResult(cleanName, rawDomain, `https://${rawDomain}`, parsedVersion);
+          addResult(rawTitle, rawDomain, `https://${rawDomain}`, parsedVersion);
         }
       }
     } catch (err) {
@@ -167,6 +205,8 @@ export async function GET(req: NextRequest) {
           .replace(/&#x27;/g, "'")
           .trim();
 
+        if (ARTICLE_PATTERNS.some((p) => p.test(rawTitle))) continue;
+
         let domain = "";
         try {
           domain = new URL(rawUrl).hostname;
@@ -174,21 +214,10 @@ export async function GET(req: NextRequest) {
           continue;
         }
 
-        let cleanName = rawTitle.split(/[|\-:–]/)[0].trim();
-        if (
-          cleanName.length > 25 ||
-          cleanName.toLowerCase().includes("home") ||
-          cleanName.toLowerCase().includes("official")
-        ) {
-          const parts = rawTitle.split(/[|\-:–]/).map((p) => p.trim());
-          const matchPart = parts.find((p) => p.toLowerCase().includes(query.toLowerCase()));
-          cleanName = matchPart || cleanName;
-        }
-
         const versionMatch = rawTitle.match(/v?(\d+\.\d+(\.\d+)?)/);
         const parsedVersion = versionMatch ? versionMatch[1] : "latest";
 
-        addResult(cleanName, domain, rawUrl, parsedVersion);
+        addResult(rawTitle, domain, rawUrl, parsedVersion);
       }
     } catch (err) {
       console.error("DDG search error:", err);
@@ -197,27 +226,15 @@ export async function GET(req: NextRequest) {
 
   await Promise.allSettled([fetchBing(), fetchDDG()]);
 
-  // Fallback: Wikipedia OpenSearch if search engines return 0 results
-  if (results.length === 0) {
-    try {
-      const wikiUrl = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=5&namespace=0&format=json`;
-      const wikiRes = await fetch(wikiUrl, {
-        headers: { "User-Agent": "Mozilla/5.0" },
-      });
-      if (wikiRes.ok) {
-        const wikiData = await wikiRes.json();
-        const titles: string[] = wikiData[1] || [];
-        const urls: string[] = wikiData[3] || [];
-        for (let i = 0; i < titles.length; i++) {
-          const title = titles[i];
-          const articleUrl = urls[i] || "";
-          addResult(title, "wikipedia.org", articleUrl);
-        }
-      }
-    } catch (err) {
-      console.error("Wikipedia search error:", err);
-    }
-  }
+  // Sort results so official domain matching query appears first
+  const queryClean = query.toLowerCase().replace(/[^a-z0-9]/g, "");
+  results.sort((a, b) => {
+    const aMatch = a.source.startsWith(queryClean) || a.name.toLowerCase() === query.toLowerCase();
+    const bMatch = b.source.startsWith(queryClean) || b.name.toLowerCase() === query.toLowerCase();
+    if (aMatch && !bMatch) return -1;
+    if (!aMatch && bMatch) return 1;
+    return 0;
+  });
 
   searchCache.set(cacheKey, { data: results, timestamp: Date.now() });
   return NextResponse.json({ results });
