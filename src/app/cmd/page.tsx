@@ -9,19 +9,29 @@ import { useStackStore } from "@/lib/store/stack-store";
 function CmdCanvasController() {
   const searchParams = useSearchParams();
   const queryParam = searchParams.get("q");
-  const { addSoftwareStack, nodes } = useStackStore();
+  const versionParam = searchParams.get("v");
+  const sourceParam = searchParams.get("s");
+  const { addNodeFromSearch, addSoftwareStack, nodes } = useStackStore();
 
   useEffect(() => {
     if (queryParam && nodes.length === 0) {
-      const items = queryParam
-        .split(/[+,&]/)
-        .map((s) => s.trim())
-        .filter(Boolean);
-      if (items.length > 0) {
-        addSoftwareStack(items);
+      if (versionParam || sourceParam) {
+        addNodeFromSearch({
+          name: queryParam,
+          version: versionParam || "latest",
+          source: sourceParam || "",
+        });
+      } else {
+        const items = queryParam
+          .split(/[+,&]/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (items.length > 0) {
+          addSoftwareStack(items);
+        }
       }
     }
-  }, [queryParam, nodes.length, addSoftwareStack]);
+  }, [queryParam, versionParam, sourceParam, nodes.length, addNodeFromSearch, addSoftwareStack]);
 
   return <StackCanvas />;
 }
