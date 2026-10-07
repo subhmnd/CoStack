@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { X, Trash2, Copy, Plus, Terminal, Globe } from "lucide-react";
+import { X, Trash2, Copy, Plus, Terminal, Globe, AlertTriangle } from "lucide-react";
 import { useStackStore, StackCardData } from "@/lib/store/stack-store";
 
 export function FloatingNodeEditor() {
@@ -16,6 +16,9 @@ export function FloatingNodeEditor() {
   if (!selectedNode) return null;
 
   const data = selectedNode.data;
+  const versionList = Array.from(
+    new Set([data.version, ...(data.versions || []), "latest", "stable"].filter(Boolean) as string[])
+  );
 
   const handleAddEnv = () => {
     if (!newEnvKey.trim()) return;
@@ -31,7 +34,7 @@ export function FloatingNodeEditor() {
   };
 
   const handleRemoveEnv = (key: string) => {
-    const currentEnv = { ...(data.env || {}) };
+    const currentEnv: Record<string, string> = { ...((data.env as Record<string, string>) || {}) };
     delete currentEnv[key];
     updateNodeData(selectedNode.id, { env: currentEnv });
   };
@@ -54,6 +57,19 @@ export function FloatingNodeEditor() {
         </button>
       </div>
 
+      {/* Conflict Warning Banner if active */}
+      {data.hasConflict && (
+        <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-2.5 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+          <div className="flex items-center gap-1.5 font-semibold text-[11px]">
+            <AlertTriangle className="h-3.5 w-3.5 text-red-600" />
+            <span>Conflict Detected</span>
+          </div>
+          <p className="mt-1 text-[10px] text-red-600/90 dark:text-red-400">
+            {data.conflictReason || "This service conflicts with another service in your stack."}
+          </p>
+        </div>
+      )}
+
       <div className="mt-3.5 space-y-3.5 text-xs">
         {/* Name */}
         <div>
@@ -68,18 +84,23 @@ export function FloatingNodeEditor() {
           />
         </div>
 
-        {/* Version & Source */}
+        {/* Version Dropdown & Source */}
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="block text-[11px] font-medium text-zinc-500 mb-1">
               Version
             </label>
-            <input
-              type="text"
-              value={data.version || ""}
+            <select
+              value={data.version || versionList[0] || "latest"}
               onChange={(e) => updateNodeData(selectedNode.id, { version: e.target.value })}
-              className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 font-mono text-zinc-900 focus:border-purple-600 focus:outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
-            />
+              className="w-full rounded-lg border border-purple-500/40 bg-zinc-50 px-2.5 py-1.5 font-mono text-xs text-zinc-900 focus:border-purple-600 focus:outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 cursor-pointer"
+            >
+              {versionList.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-[11px] font-medium text-zinc-500 mb-1">
@@ -88,7 +109,7 @@ export function FloatingNodeEditor() {
             <input
               type="text"
               value={data.source || ""}
-              placeholder="e.g. aapanel.com"
+              placeholder="e.g. domain.com"
               onChange={(e) => updateNodeData(selectedNode.id, { source: e.target.value })}
               className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 font-mono text-zinc-900 focus:border-purple-600 focus:outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
             />

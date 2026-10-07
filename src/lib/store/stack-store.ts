@@ -18,12 +18,13 @@ export interface StackCardData extends Record<string, unknown> {
   name: string;
   label: string;
   version: string;
+  versions: string[];
   source: string;
   sourceUrl?: string;
-  status: "Running" | "Configured" | "Healthy" | "Idle";
-  port?: number;
-  runtime?: "Native" | "Container" | "Binary";
-  env?: Record<string, string>;
+  category?: string;
+  hasConflict?: boolean;
+  conflictReason?: string;
+  status: "Running" | "Configured" | "Healthy" | "Idle" | string;
   command?: string;
 }
 
@@ -52,8 +53,10 @@ export interface StackStore {
   addNodeFromSearch: (item: {
     name: string;
     version: string;
+    versions?: string[];
     source: string;
     sourceUrl?: string;
+    category?: string;
   }) => void;
   addSoftwareStack: (itemNames: string[]) => void;
   updateNodeData: (id: string, data: Partial<StackCardData>) => void;
@@ -61,6 +64,48 @@ export interface StackStore {
   duplicateNode: (id: string) => void;
   clearStack: () => void;
   loadFromManifest: (manifest: any) => void;
+}
+
+/**
+ * Helper to evaluate and flag conflicts across active nodes
+ */
+function flagNodeConflicts(nodes: StackNode[]): StackNode[] {
+  // Generic conflict check for panels (cPanel, aaPanel, etc. all contain "panel" or have category "panel")
+  const panelNodes = nodes.filter(
+    (n) =>
+      n.data.category === "panel" ||
+      n.data.name.toLowerCase().includes("panel")
+  );
+
+  const hasMultiplePanels = panelNodes.length > 1;
+
+  return nodes.map((node) => {
+    const isPanel = panelNodes.some((p) => p.id === node.id);
+
+    if (hasMultiplePanels && isPanel) {
+      const otherPanelNames = panelNodes
+        .filter((p) => p.id !== node.id)
+        .map((p) => p.data.name)
+        .join(", ");
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          hasConflict: true,
+          conflictReason: `Conflicting control panel: cannot run alongside ${otherPanelNames}`,
+        },
+      };
+    }
+
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        hasConflict: false,
+        conflictReason: undefined,
+      },
+    };
+  });
 }
 
 export const useStackStore = create<StackStore>((set, get) => ({
@@ -91,6 +136,19 @@ export const useStackStore = create<StackStore>((set, get) => ({
   },
 
   onConnect: (connection: Connection) => {
+    // RULE: Exactly one connection = one relationship between the same two nodes!
+    // Disallow multiple duplicate lines between node A and node B
+    const alreadyConnected = get().edges.some(
+      (e) =>
+        (e.source === connection.source && e.target === connection.target) ||
+        (e.source === connection.target && e.target === connection.source)
+    );
+
+    if (alreadyConnected) {
+      // Do not allow multiple lines between the same 2 nodes
+      return;
+    }
+
     const newEdge: Edge = {
       ...connection,
       id: `edge-${connection.source}-${connection.target}-${Date.now()}`,
@@ -107,6 +165,7 @@ export const useStackStore = create<StackStore>((set, get) => ({
         stroke: "#7c3aed",
       },
     };
+
     set({
       edges: addEdge(newEdge, get().edges),
     });
@@ -120,6 +179,11 @@ export const useStackStore = create<StackStore>((set, get) => ({
     const startX = 240 + count * spacingX;
     const startY = 220;
 
+    const availableVersions =
+      item.versions && item.versions.length > 0
+        ? item.versions
+        : [item.version || "latest"];
+
     const newNode: StackNode = {
       id: nodeId,
       type: "stackCard",
@@ -128,43 +192,50 @@ export const useStackStore = create<StackStore>((set, get) => ({
         id: slugId,
         name: item.name,
         label: item.name,
-        version: item.version || "latest",
+        version: item.version || availableVersions[0] || "latest",
+        versions: availableVersions,
         source: item.source || "",
         sourceUrl: item.sourceUrl || "",
+        category: item.category || (slugId.includes("panel") ? "panel" : "application"),
         status: "Running",
-        port: 80,
-        runtime: "Native",
-        env: {},
       },
     };
 
     const newEdges = [...get().edges];
-    // Connect to previous node if available
+    // Automatically link to previous node ONLY if they do NOT conflict
     if (count > 0) {
       const prevNode = get().nodes[count - 1];
-      newEdges.push({
-        id: `edge-${prevNode.id}-${nodeId}`,
-        source: prevNode.id,
-        target: nodeId,
-        sourceHandle: "right",
-        targetHandle: "left",
-        type: "smoothstep",
-        animated: true,
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          width: 16,
-          height: 16,
-          color: "#7c3aed",
-        },
-        style: {
-          strokeWidth: 2,
-          stroke: "#7c3aed",
-        },
-      });
+      const prevIsPanel = prevNode.data.category === "panel" || prevNode.data.name.toLowerCase().includes("panel");
+      const newIsPanel = newNode.data.category === "panel" || newNode.data.name.toLowerCase().includes("panel");
+      const isConflict = prevIsPanel && newIsPanel;
+
+      if (!isConflict) {
+        newEdges.push({
+          id: `edge-${prevNode.id}-${nodeId}`,
+          source: prevNode.id,
+          target: nodeId,
+          sourceHandle: "right",
+          targetHandle: "left",
+          type: "smoothstep",
+          animated: true,
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 16,
+            height: 16,
+            color: "#7c3aed",
+          },
+          style: {
+            strokeWidth: 2,
+            stroke: "#7c3aed",
+          },
+        });
+      }
     }
 
+    const updatedNodes = flagNodeConflicts([...get().nodes, newNode]);
+
     set({
-      nodes: [...get().nodes, newNode],
+      nodes: updatedNodes,
       edges: newEdges,
       searchQuery: "",
     });
@@ -202,12 +273,11 @@ export const useStackStore = create<StackStore>((set, get) => ({
           name: cleanName,
           label: cleanName,
           version: "latest",
-          source: `${slugId}.org`,
+          versions: ["latest"],
+          source: `${slugId}.com`,
           sourceUrl: "",
+          category: slugId.includes("panel") ? "panel" : "application",
           status: "Running",
-          port: 80,
-          runtime: "Native",
-          env: {},
         },
       });
 
@@ -235,36 +305,41 @@ export const useStackStore = create<StackStore>((set, get) => ({
       }
     });
 
+    const flaggedNodes = flagNodeConflicts(newNodes);
+
     set({
       slug: newSlug,
       stackName: itemNames.join(" + "),
-      nodes: newNodes,
+      nodes: flaggedNodes,
       edges: newEdges,
       searchQuery: "",
     });
   },
 
   updateNodeData: (id: string, updatedData: Partial<StackCardData>) => {
+    const updated = get().nodes.map((node) => {
+      if (node.id === id) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            ...updatedData,
+            label: updatedData.name || node.data.name,
+          },
+        };
+      }
+      return node;
+    });
+
     set({
-      nodes: get().nodes.map((node) => {
-        if (node.id === id) {
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              ...updatedData,
-              label: updatedData.name || node.data.name,
-            },
-          };
-        }
-        return node;
-      }),
+      nodes: flagNodeConflicts(updated),
     });
   },
 
   deleteNode: (id: string) => {
+    const remaining = get().nodes.filter((node) => node.id !== id);
     set({
-      nodes: get().nodes.filter((node) => node.id !== id),
+      nodes: flagNodeConflicts(remaining),
       edges: get().edges.filter((edge) => edge.source !== id && edge.target !== id),
       selectedNodeId: get().selectedNodeId === id ? null : get().selectedNodeId,
     });
@@ -289,8 +364,10 @@ export const useStackStore = create<StackStore>((set, get) => ({
       },
     };
 
+    const updated = flagNodeConflicts([...get().nodes, duplicate]);
+
     set({
-      nodes: [...get().nodes, duplicate],
+      nodes: updated,
       selectedNodeId: newId,
     });
   },
@@ -311,7 +388,7 @@ export const useStackStore = create<StackStore>((set, get) => ({
     set({
       slug: manifest.slug || generateStackSlug(),
       stackName: manifest.name || "Loaded Stack",
-      nodes: manifest.nodes || [],
+      nodes: flagNodeConflicts(manifest.nodes || []),
       edges: manifest.edges || [],
       selectedNodeId: null,
     });

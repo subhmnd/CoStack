@@ -12,7 +12,9 @@ export const StackCardNode = memo(({ id, data, selected }: NodeProps<StackNode>)
     <div
       onClick={() => setSelectedNodeId(id)}
       className={`relative group w-52 rounded-xl border bg-white p-3.5 shadow-sm transition-all dark:bg-black select-none cursor-pointer ${
-        selected
+        data.hasConflict
+          ? "border-red-500 ring-2 ring-red-500/30 bg-red-500/[0.04] shadow-md shadow-red-500/10"
+          : selected
           ? "border-purple-600 ring-2 ring-purple-600/20 shadow-md"
           : "border-zinc-200 hover:border-zinc-400 dark:border-zinc-800 dark:hover:border-zinc-700"
       }`}
@@ -121,14 +123,31 @@ export const StackCardNode = memo(({ id, data, selected }: NodeProps<StackNode>)
           <span />
         )}
 
-        <div className="flex items-center gap-1 text-[11px] font-medium text-zinc-700 dark:text-zinc-300">
-          <span className="relative flex h-1.5 w-1.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-          </span>
-          <span>{data.status || "Running"}</span>
-        </div>
+        {data.hasConflict ? (
+          <div className="flex items-center gap-1 text-[11px] font-semibold text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-950/60 px-1.5 py-0.5 rounded border border-red-200 dark:border-red-800">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
+            </span>
+            <span>⚠ Conflict</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 text-[11px] font-medium text-zinc-700 dark:text-zinc-300">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+            </span>
+            <span>{data.status || "Running"}</span>
+          </div>
+        )}
       </div>
+
+      {/* Visible conflict alert below status */}
+      {data.hasConflict && (
+        <div className="mt-2 text-[10px] text-red-600 dark:text-red-400 font-medium bg-red-50 dark:bg-red-950/40 px-2 py-1 rounded border border-red-200 dark:border-red-800 leading-tight">
+          {data.conflictReason || "Conflict: Incompatible with existing services"}
+        </div>
+      )}
     </div>
   );
 });

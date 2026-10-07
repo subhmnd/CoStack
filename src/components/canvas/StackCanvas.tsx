@@ -34,6 +34,38 @@ export function StackCanvas() {
     []
   );
 
+  const isValidConnection = React.useCallback(
+    (connection: any) => {
+      if (connection.source === connection.target) return false;
+
+      // ONLY 1 LINE ALLOWED between any pair of nodes (disallow duplicate lines)
+      const alreadyConnected = edges.some(
+        (e) =>
+          (e.source === connection.source && e.target === connection.target) ||
+          (e.source === connection.target && e.target === connection.source)
+      );
+      if (alreadyConnected) return false;
+
+      // Block connecting conflicting control panels
+      const sourceNode = nodes.find((n) => n.id === connection.source);
+      const targetNode = nodes.find((n) => n.id === connection.target);
+      if (sourceNode && targetNode) {
+        const sourceIsPanel =
+          sourceNode.data.category === "panel" ||
+          sourceNode.data.name.toLowerCase().includes("panel");
+        const targetIsPanel =
+          targetNode.data.category === "panel" ||
+          targetNode.data.name.toLowerCase().includes("panel");
+        if (sourceIsPanel && targetIsPanel) {
+          return false;
+        }
+      }
+
+      return true;
+    },
+    [edges, nodes]
+  );
+
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-white dark:bg-black">
       <ReactFlow
@@ -42,6 +74,7 @@ export function StackCanvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        isValidConnection={isValidConnection}
         nodeTypes={nodeTypes}
         connectionMode={ConnectionMode.Loose}
         onPaneClick={() => setSelectedNodeId(null)}

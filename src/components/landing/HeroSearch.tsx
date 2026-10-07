@@ -8,9 +8,9 @@ import { SearchResultItem } from "@/lib/stack-parser";
 const ROTATING_EXAMPLES = [
   "Search what you want to install...",
   "WordPress",
-  "Docker",
-  "Nextcloud",
+  "Nginx",
   "PostgreSQL",
+  "Node.js",
 ];
 
 export function HeroSearch() {

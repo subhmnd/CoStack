@@ -1,15 +1,14 @@
 import { pgTable, text, serial, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
 
 export const technologies = pgTable("technologies", {
-  id: text("id").primaryKey(), // e.g. "nextcloud", "docker", "postgresql"
+  id: text("id").primaryKey(), // e.g. "cpanel", "nginx", "postgresql"
   name: text("name").notNull(),
-  category: text("category").notNull(), // "runtime", "database", "cache", "application", "proxy"
+  category: text("category").notNull(), // "panel", "runtime", "database", "cache", "application"
   description: text("description").notNull(),
   defaultVersion: text("default_version").notNull(),
   officialDocsUrl: text("official_docs_url").notNull(),
   officialRepoUrl: text("official_repo_url").notNull(),
-  installType: text("install_type").notNull().default("docker"), // "docker", "binary", "system"
-  dockerImage: text("docker_image"),
+  installType: text("install_type").notNull().default("system"), // "system", "binary"
   defaultPort: integer("default_port"),
   healthCheckCmd: text("health_check_cmd"),
   envTemplate: jsonb("env_template").$type<Record<string, string>>(),

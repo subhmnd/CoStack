@@ -35,52 +35,6 @@ echo -e "\${GREEN}✓\${NC} Completed step: ${rawName}"
 `;
       }
 
-      // Check for prominent native system installers
-      const lower = rawName.toLowerCase();
-      if (lower.includes("cpanel")) {
-        return `
-# ------------------------------------------------------------------------------
-# Step ${stepNum}/${orderedNodes.length}: Install cPanel & WHM
-# ------------------------------------------------------------------------------
-echo -e "\${CYAN}[Step ${stepNum}/${orderedNodes.length}]\${NC} Deploying \${BOLD}cPanel & WHM\${NC}..."
-cd /home
-curl -o latest -L https://securedownloads.cpanel.net/latest
-sh latest
-echo -e "\${GREEN}✓\${NC} cPanel & WHM installation initiated on port 2087/2083."
-`;
-      }
-
-      if (lower.includes("cloudlinux")) {
-        return `
-# ------------------------------------------------------------------------------
-# Step ${stepNum}/${orderedNodes.length}: Deploy CloudLinux
-# ------------------------------------------------------------------------------
-echo -e "\${CYAN}[Step ${stepNum}/${orderedNodes.length}]\${NC} Converting system to \${BOLD}CloudLinux\${NC}..."
-cd /tmp
-curl -fsSL https://repo.cloudlinux.com/cloudlinux/sources/cln/cldeploy -o cldeploy
-sh cldeploy -k "\${CLOUDLINUX_KEY:-}" || sh cldeploy
-echo -e "\${GREEN}✓\${NC} CloudLinux kernel conversion script executed."
-`;
-      }
-
-      // If user selected Container explicitly
-      if (data.runtime === "Container") {
-        return `
-# ------------------------------------------------------------------------------
-# Step ${stepNum}/${orderedNodes.length}: Deploy Container [${rawName}]
-# ------------------------------------------------------------------------------
-echo -e "\${CYAN}[Step ${stepNum}/${orderedNodes.length}]\${NC} Deploying \${BOLD}${rawName}\${NC} via container runtime..."
-if command -v docker &> /dev/null; then
-  docker run -d --name "${slugName}" -p ${port}:${port} "${slugName}:${version}" || true
-elif command -v podman &> /dev/null; then
-  podman run -d --name "${slugName}" -p ${port}:${port} "${slugName}:${version}" || true
-else
-  echo -e "\${YELLOW}Warning:\${NC} No container runtime found on system for ${rawName}. Installing via package manager..."
-  $PKG_INSTALL "${slugName}" || true
-fi
-`;
-      }
-
       // Default: Clean Native System / Bare-Metal installation
       return `
 # ------------------------------------------------------------------------------
