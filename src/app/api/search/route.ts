@@ -13,7 +13,7 @@ export interface SearchResultItem {
 const searchCache = new Map<string, { data: SearchResultItem[]; timestamp: number }>();
 const CACHE_TTL = 1000 * 60 * 30; // 30 mins
 
-// Exclude tutorial blogs, forums, shopping sites, social media, question sites, and encyclopedias
+// Exclude non-software domains (social media, consumer shopping, blog tutorials)
 const JUNK_KEYWORDS = [
   "wikipedia", "hostinger", "geeksforgeeks", "medium", "youtube", "reddit",
   "quora", "stackoverflow", "w3schools", "ebay", "amazon", "flickr",
@@ -65,7 +65,15 @@ function isJunkDomainOrTitle(domain: string, title: string): boolean {
   return false;
 }
 
-function extractInstallCommand(rawHtml: string): string | null {
+/**
+ * Purely generic extraction of installer commands from webpage text.
+ * No hardcoded software names or domains.
+ */
+function extractGenericCommand(rawHtml: string, pageUrl: string): string | null {
+  if (rawHtml.trim().startsWith("#!/bin/sh") || rawHtml.trim().startsWith("#!/bin/bash")) {
+    return `curl -fsSL ${pageUrl} | sh`;
+  }
+
   const text = rawHtml
     .replace(/&amp;/g, "&")
     .replace(/&#x27;/g, "'")
@@ -73,22 +81,29 @@ function extractInstallCommand(rawHtml: string): string | null {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">");
 
-  // Pipe command: curl ... | bash or wget ... | bash
-  const pipeMatch = text.match(/(?:curl|wget)\s+[^\n<`"'\$]+(?:\|\s*(?:bash|sh|sudo\s+bash|sudo\s+sh))/i);
+  // Pipe pattern: curl/wget ... | [sudo] bash/sh
+  const pipeMatch = text.match(/(?:curl|wget)\s+[^\n<`"'\$]+(?:\|\s*(?:sudo\s+)?(?:bash|sh))/i);
   if (pipeMatch) {
     return pipeMatch[0].replace(/<[^>]+>/g, "").trim();
   }
 
-  // Chained command: curl -O ... && bash ... or wget -O ... && bash ...
+  // Chained download + execute: curl/wget ... && [sudo] bash/sh ...
   const seqMatch = text.match(/(?:curl|wget)\s+[^\n<`"'\$]+(?:&&|;)\s*(?:sudo\s+)?(?:bash|sh)\s+[^\s<"';&]+/i);
   if (seqMatch) {
     return seqMatch[0].replace(/<[^>]+>/g, "").trim();
   }
 
-  // cPanel specific sequence: curl -o latest -L ... && sh latest
-  const cpanelMatch = text.match(/curl\s+-[a-zA-Z]+\s+[^\n<"'\$]+securedownloads\.cpanel\.net\/latest/i);
-  if (cpanelMatch) {
-    return "cd /home && curl -o latest -L https://securedownloads.cpanel.net/latest && sh latest";
+  // Chained download + chmod + exec: curl/wget -O <url.sh> && chmod +x <script.sh> && ./<script.sh>
+  const chmodMatch = text.match(/(?:curl|wget)\s+[^\n<`"'\$]+\.sh(?:\s*&&\s*|\n)chmod\s+\+x\s+[^\s<"';&]+\.sh(?:\s*&&\s*|\n)(?:\.\/[^\s<"';&]+\.sh)/i);
+  if (chmodMatch) {
+    return chmodMatch[0].replace(/\n/g, " && ").replace(/<[^>]+>/g, "").trim();
+  }
+
+  // Multi-line download and run: curl -o <name> -L <url> ... sh <name>
+  const dlRunMatch = text.match(/curl\s+-[a-zA-Z]+\s+([a-zA-Z0-9_\.-]+)\s+-L\s+[^\s<"';&]+[\s\S]{1,100}?\bsh\s+\1/i);
+  if (dlRunMatch) {
+    const lines = dlRunMatch[0].split("\n").map((l) => l.trim()).filter(Boolean);
+    return lines.join(" && ");
   }
 
   return null;
@@ -127,7 +142,6 @@ export async function GET(req: NextRequest) {
     if (!cleanDomain || seenDomains.has(cleanDomain)) return;
     if (isJunkDomainOrTitle(cleanDomain, rawTitle)) return;
 
-    // Never show generic "GitHub" entry
     if (cleanDomain.includes("github.com")) {
       if (rawTitle.toLowerCase().startsWith("github") && results.length > 0) {
         return;
@@ -139,11 +153,9 @@ export async function GET(req: NextRequest) {
     const queryClean = query.toLowerCase().replace(/[^a-z0-9]/g, "");
     const domainBase = cleanDomain.split(".")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
 
-    // Determine normalized software name
     let cleanName = query.charAt(0).toUpperCase() + query.slice(1);
 
     if (domainBase === queryClean || cleanDomain.startsWith(queryClean + ".")) {
-      // Direct official domain (e.g. aapanel.com -> aaPanel)
       const m = rawTitle.match(new RegExp(`\\b(${query})\\b`, "i"));
       cleanName = m ? m[0] : cleanName;
     } else if (cleanDomain.includes("github.com")) {
@@ -163,12 +175,10 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Deduplicate by normalized name (e.g. don't show 3 aaPanel items)
     const normKey = cleanName.toLowerCase().replace(/[^a-z0-9]/g, "");
     if (seenNames.has(normKey)) return;
     seenNames.add(normKey);
 
-    // Extract software version safely without confusing with host OS versions (e.g. Ubuntu 24.04)
     const titleWithoutDistro = rawTitle.replace(/\b(ubuntu|debian|centos|fedora|rocky|alma|rhel|linux)\s*\d+(\.\d+)*/gi, "");
     const vMatch = titleWithoutDistro.match(/v?(\d+\.\d+(\.\d+)?)/);
     const parsedVersion = vMatch ? vMatch[1] : "latest";
@@ -179,12 +189,6 @@ export async function GET(req: NextRequest) {
     if (!command) {
       if (realUrl.endsWith(".sh")) {
         command = `curl -fsSL ${realUrl} | bash`;
-      } else if (cleanDomain.includes("aapanel.com")) {
-        command = "curl -sSO https://www.aapanel.com/script/install_7.0_en.sh && bash install_7.0_en.sh aapanel";
-      } else if (cleanDomain.includes("cpanel.net")) {
-        command = "cd /home && curl -o latest -L https://securedownloads.cpanel.net/latest && sh latest";
-      } else if (cleanDomain.includes("docker.com")) {
-        command = "curl -fsSL https://get.docker.com | sh";
       } else {
         command = `$PKG_INSTALL ${cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, "")}`;
       }
@@ -280,12 +284,12 @@ export async function GET(req: NextRequest) {
 
   await Promise.allSettled([fetchDDGHtml(), fetchBing()]);
 
-  // Deep inspect the top 2 candidate websites to retrieve exact script if missing
-  const deepScanPromises = results.slice(0, 2).map(async (item) => {
+  // Deep inspect candidate websites to retrieve exact script dynamically
+  const deepScanPromises = results.map(async (item) => {
     if (item.command && !item.command.startsWith("$PKG_INSTALL")) return;
     try {
       const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 2000);
+      const tid = setTimeout(() => controller.abort(), 2500);
       const res = await fetch(item.sourceUrl, {
         signal: controller.signal,
         headers: {
@@ -297,7 +301,7 @@ export async function GET(req: NextRequest) {
       if (!res.ok) return;
 
       const text = await res.text();
-      const found = extractInstallCommand(text);
+      const found = extractGenericCommand(text, item.sourceUrl);
       if (found) {
         item.command = found;
       }
@@ -318,7 +322,6 @@ export async function GET(req: NextRequest) {
     return 0;
   });
 
-  // Limit suggestions to max 4 clean, distinct software choices
   const finalResults = results.slice(0, 4);
 
   searchCache.set(cacheKey, { data: finalResults, timestamp: Date.now() });

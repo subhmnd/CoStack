@@ -1,27 +1,55 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { Check, Copy, ExternalLink, RotateCcw, Terminal } from "lucide-react";
 import { useStackStore } from "@/lib/store/stack-store";
 
 export function BashLinkBanner() {
-  const { slug, nodes, clearStack } = useStackStore();
+  const { slug, stackName, nodes, edges, clearStack } = useStackStore();
   const [copied, setCopied] = useState(false);
+
+  // Auto-persist stack to server so curl -fsSL ... | bash serves the exact configured scripts
+  useEffect(() => {
+    if (nodes.length === 0) return;
+
+    const timeout = setTimeout(() => {
+      fetch("/api/stacks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug, name: stackName, nodes, edges }),
+      }).catch((e) => {
+        console.warn("Background stack save error:", e);
+      });
+    }, 400);
+
+    return () => clearTimeout(timeout);
+  }, [slug, stackName, nodes, edges]);
 
   if (nodes.length === 0) return null;
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://costack.tech";
   const bashCmd = `curl -fsSL ${appUrl}/c/${slug} | bash`;
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
+    // Guarantee stack is saved before copying command
+    try {
+      await fetch("/api/stacks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug, name: stackName, nodes, edges }),
+      });
+    } catch (e) {
+      console.warn("Immediate save on copy error:", e);
+    }
+
     navigator.clipboard.writeText(bashCmd);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   return (
-    <div className="absolute top-18 right-6 z-30 flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+    <div className="absolute top-18 right-6 z-30 flex items-center gap-2 animate-in fade-in slide-from-top-2">
       <div className="flex items-center rounded-xl border border-zinc-200/90 bg-white/95 px-3 py-1.5 shadow-md backdrop-blur-md dark:border-zinc-800/90 dark:bg-black/95 transition-all">
         <Terminal className="h-3.5 w-3.5 text-zinc-500 mr-2 flex-shrink-0" />
         <span className="font-mono text-xs text-zinc-800 dark:text-zinc-200 mr-3 truncate max-w-[280px] sm:max-w-[360px]">

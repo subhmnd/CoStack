@@ -233,6 +233,21 @@ export const useStackStore = create<StackStore>((set, get) => ({
       searchQuery: "",
       selectedNodeId: nodeId,
     });
+
+    // If command wasn't provided, dynamically resolve official script from web search API
+    if (!item.command) {
+      fetch(`/api/search?q=${encodeURIComponent(item.name)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.results && data.results.length > 0 && data.results[0].command) {
+            get().updateNodeData(nodeId, {
+              command: data.results[0].command,
+              source: data.results[0].source || item.source,
+            });
+          }
+        })
+        .catch(() => {});
+    }
   },
 
   addSoftwareStack: (itemNames: string[]) => {
@@ -310,6 +325,29 @@ export const useStackStore = create<StackStore>((set, get) => ({
       edges: newEdges,
       searchQuery: "",
       selectedNodeId: newNodes[0]?.id || null,
+    });
+
+    // Dynamically resolve official scripts for each service from search API
+    itemNames.forEach((name, i) => {
+      const cleanName = name.trim();
+      const slugId = cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+      const nodeId = `node-${slugId}-${i}`;
+
+      fetch(`/api/search?q=${encodeURIComponent(cleanName)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.results && data.results.length > 0) {
+            const best = data.results[0];
+            get().updateNodeData(nodeId, {
+              command: best.command || "",
+              source: best.source || "",
+              sourceUrl: best.sourceUrl || "",
+              version: best.version || "latest",
+              versions: best.versions || ["latest"],
+            });
+          }
+        })
+        .catch(() => {});
     });
   },
 

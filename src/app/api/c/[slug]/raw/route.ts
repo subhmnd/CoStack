@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { getStackBySlug } from "@/lib/stack-service";
 import { generateStackManifest } from "@/lib/executor/manifest-generator";
 import { generateBashInstaller } from "@/lib/executor/bash-generator";
 import { createSoftwareNodeData } from "@/lib/stack-parser";
@@ -9,8 +10,19 @@ export async function GET(
 ) {
   const { slug } = await params;
 
-  // Extract items from slug (e.g., "nextcloud-postgres-7x2k" or "wordpress-mysql")
-  // Extract tokens by removing the trailing nanoid hash
+  // 1. Retrieve exact saved stack configured on the canvas
+  const saved = await getStackBySlug(slug);
+  if (saved && saved.bashScript) {
+    return new Response(saved.bashScript, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache, no-store, max-age=0, must-revalidate",
+      },
+    });
+  }
+
+  // 2. Dynamic fallback if accessed directly from slug without saving
   const parts = slug.split("-");
   const rawNames = parts.length > 1 ? parts.slice(0, -1) : parts;
 
@@ -39,7 +51,7 @@ export async function GET(
     status: 200,
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "public, max-age=3600, s-maxage=86400",
+      "Cache-Control": "no-cache, no-store, max-age=0, must-revalidate",
     },
   });
 }
