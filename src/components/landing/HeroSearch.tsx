@@ -87,7 +87,7 @@ export function HeroSearch() {
 
   const handleSelect = (item: SearchResultItem) => {
     router.push(
-      `/cmd?q=${encodeURIComponent(item.name)}&v=${encodeURIComponent(item.version)}&s=${encodeURIComponent(item.source)}`
+      `/cmd?q=${encodeURIComponent(item.name)}&v=${encodeURIComponent(item.version)}&s=${encodeURIComponent(item.source)}${item.command ? `&cmd=${encodeURIComponent(item.command)}` : ""}`
     );
   };
 

@@ -7,7 +7,7 @@ export interface SearchResultItem {
   versions: string[];
   source: string;
   sourceUrl: string;
-  category: "panel" | "webserver" | "database" | "cache" | "runtime" | "os" | "application";
+  command?: string;
 }
 
 const searchCache = new Map<string, { data: SearchResultItem[]; timestamp: number }>();
@@ -47,6 +47,51 @@ const ARTICLE_PATTERNS = [
   /\b(pros and cons|tutorial|\bvs\b|review|alternative to)/i,
 ];
 
+function decodeBingUrl(bingHref: string): string {
+  const clean = bingHref.replace(/&amp;/g, "&");
+  const uMatch = clean.match(/[?&]u=a1([^&]+)/);
+  if (uMatch) {
+    try {
+      const b64 = uMatch[1].replace(/-/g, "+").replace(/_/g, "/");
+      const pad = b64.length % 4 === 0 ? b64 : b64 + "=".repeat(4 - (b64.length % 4));
+      return Buffer.from(pad, "base64").toString("utf-8");
+    } catch {
+      return bingHref;
+    }
+  }
+  return bingHref;
+}
+
+/**
+ * Scan webpage text for curl/wget shell installer scripts
+ */
+function extractInstallCommand(text: string): string | null {
+  // Direct shell script check
+  if (text.trim().startsWith("#!/bin/sh") || text.trim().startsWith("#!/bin/bash")) {
+    return null;
+  }
+
+  // Common pattern: curl ... | bash or wget ... | bash
+  const pipeMatch = text.match(/(?:curl|wget)\s+[^<\n`"'\$]+(?:\|\s*(?:bash|sh|sudo\s+bash|sudo\s+sh))/i);
+  if (pipeMatch) {
+    return pipeMatch[0].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim();
+  }
+
+  // Pattern: curl -O ... && bash ... or curl -o ... && sh ...
+  const seqMatch = text.match(/(?:curl|wget)\s+[^<\n`"'\$]+(?:&&|;)\s*(?:bash|sh|sudo\s+bash)\s+[^\s<"';&]+/i);
+  if (seqMatch) {
+    return seqMatch[0].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim();
+  }
+
+  // Pattern: curl -sSO ... && bash ...
+  const dlMatch = text.match(/curl\s+(?:-[a-zA-Z]+\s+)+https?:\/\/[^\s<"';&]+\s*&&\s*(?:bash|sh)\s+[^\s<"';&]+/i);
+  if (dlMatch) {
+    return dlMatch[0].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim();
+  }
+
+  return null;
+}
+
 export async function GET(req: NextRequest) {
   const query = req.nextUrl.searchParams.get("q")?.trim() || "";
 
@@ -67,7 +112,8 @@ export async function GET(req: NextRequest) {
     rawName: string,
     domain: string,
     url: string,
-    foundVersion = "latest"
+    foundVersion = "latest",
+    foundCommand = ""
   ) => {
     let cleanDomain = domain
       .toLowerCase()
@@ -84,7 +130,7 @@ export async function GET(req: NextRequest) {
     const queryClean = query.toLowerCase().replace(/[^a-z0-9]/g, "");
     const domainBase = cleanDomain.split(".")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
 
-    // If official domain directly matches query (e.g. cpanel.net for cpanel, aapanel.com for aapanel)
+    // If official domain directly matches query
     if (domainBase === queryClean || cleanDomain.startsWith(queryClean + ".")) {
       if (cleanName.length > 25 || !cleanName.toLowerCase().includes(query.toLowerCase())) {
         cleanName = query.charAt(0).toUpperCase() + query.slice(1);
@@ -99,27 +145,9 @@ export async function GET(req: NextRequest) {
       cleanName = matchPart || cleanName;
     }
 
-    const lower = `${cleanName} ${cleanDomain}`.toLowerCase();
-    let category: SearchResultItem["category"] = "application";
-    if (lower.includes("panel") || lower.includes("hosting")) {
-      category = "panel";
-    } else if (
-      lower.includes("server") ||
-      lower.includes("proxy") ||
-      lower.includes("nginx") ||
-      lower.includes("apache")
-    ) {
-      category = "webserver";
-    } else if (
-      lower.includes("database") ||
-      lower.includes("sql") ||
-      lower.includes("postgres") ||
-      lower.includes("redis")
-    ) {
-      category = "database";
-    }
-
     const versions = Array.from(new Set([foundVersion, "latest", "stable", "lts"]));
+    const fallbackCmd = `$PKG_INSTALL ${cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, "")}`;
+    const command = foundCommand || fallbackCmd;
 
     results.push({
       id: cleanDomain.replace(/[^a-z0-9]/gi, "-"),
@@ -128,14 +156,14 @@ export async function GET(req: NextRequest) {
       versions,
       source: cleanDomain,
       sourceUrl: url,
-      category,
+      command,
     });
   };
 
-  // Run Bing Web Search and DuckDuckGo Lite concurrently
+  // Run Bing Web Search and DuckDuckGo Lite concurrently for install scripts
   const fetchBing = async () => {
     try {
-      const bingUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}&setlang=en&mkt=en-US`;
+      const bingUrl = `https://www.bing.com/search?q=${encodeURIComponent(query + " linux install script")}&setlang=en&mkt=en-US`;
       const res = await fetch(bingUrl, {
         headers: {
           "User-Agent":
@@ -149,22 +177,31 @@ export async function GET(req: NextRequest) {
       const algos = html.match(/<li class="b_algo"[\s\S]*?<\/li>/g) || [];
 
       for (const item of algos) {
-        const titleMatch = item.match(/<h2[^>]*><a[^>]*>([\s\S]*?)<\/a><\/h2>/);
+        const titleMatch = item.match(/<h2[^>]*><a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a><\/h2>/);
         const domainMatch =
           item.match(/<div class="tptt">([^<]+)<\/div>/) ||
           item.match(/<cite[^>]*>([\s\S]*?)<\/cite>/) ||
           item.match(/aria-label="([^"]+)"/);
+        const snippetMatch =
+          item.match(/<p class="b_lineclamp[^>]*>([\s\S]*?)<\/p>/) ||
+          item.match(/<div class="b_caption">[\s\S]*?<p>([\s\S]*?)<\/p>/);
 
         if (titleMatch && domainMatch) {
-          const rawTitle = titleMatch[1].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim();
+          const rawHref = titleMatch[1];
+          const realUrl = decodeBingUrl(rawHref);
+          const rawTitle = titleMatch[2].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim();
           const rawDomain = domainMatch[1].replace(/<[^>]+>/g, "").trim();
+          const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, "").trim() : "";
 
           if (ARTICLE_PATTERNS.some((p) => p.test(rawTitle))) continue;
+
+          // Check snippet for command
+          let foundCommand = extractInstallCommand(snippet) || "";
 
           const versionMatch = rawTitle.match(/v?(\d+\.\d+(\.\d+)?)/);
           const parsedVersion = versionMatch ? versionMatch[1] : "latest";
 
-          addResult(rawTitle, rawDomain, `https://${rawDomain}`, parsedVersion);
+          addResult(rawTitle, rawDomain, realUrl, parsedVersion, foundCommand);
         }
       }
     } catch (err) {
@@ -181,7 +218,7 @@ export async function GET(req: NextRequest) {
           "Content-Type": "application/x-www-form-urlencoded",
           Accept: "*/*",
         },
-        body: `q=${encodeURIComponent(query)}`,
+        body: `q=${encodeURIComponent(query + " linux install script")}`,
       });
 
       if (!res.ok) return;
@@ -225,6 +262,45 @@ export async function GET(req: NextRequest) {
   };
 
   await Promise.allSettled([fetchBing(), fetchDDG()]);
+
+  // Deep inspect the top 2 candidate websites to retrieve exact script if missing
+  const deepScanPromises = results.slice(0, 3).map(async (item) => {
+    if (item.command && !item.command.startsWith("$PKG_INSTALL")) return;
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 2000);
+      const res = await fetch(item.sourceUrl, {
+        signal: controller.signal,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        },
+      });
+      clearTimeout(tid);
+      if (!res.ok) return;
+
+      // If the URL directly points to an installer script
+      if (item.sourceUrl.endsWith(".sh")) {
+        item.command = `curl -fsSL ${item.sourceUrl} | bash`;
+        return;
+      }
+
+      const text = await res.text();
+      if (text.startsWith("#!/bin/sh") || text.startsWith("#!/bin/bash")) {
+        item.command = `curl -fsSL ${item.sourceUrl} | bash`;
+        return;
+      }
+
+      const found = extractInstallCommand(text);
+      if (found) {
+        item.command = found;
+      }
+    } catch {
+      // Ignore network timeout
+    }
+  });
+
+  await Promise.allSettled(deepScanPromises);
 
   // Sort results so official domain matching query appears first
   const queryClean = query.toLowerCase().replace(/[^a-z0-9]/g, "");

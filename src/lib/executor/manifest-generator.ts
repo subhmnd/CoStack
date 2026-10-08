@@ -6,13 +6,10 @@ export interface StackNodeData {
   version: string;
   source?: string;
   sourceUrl?: string;
-  status: "Running" | "Configured" | "Healthy" | "Idle" | string;
-  port?: number;
-  env?: Record<string, string>;
-  runtime?: "Native" | "Container" | "Binary";
   command?: string;
-  officialDocsUrl?: string;
-  officialRepoUrl?: string;
+  args?: string;
+  inputs?: Record<string, string>;
+  autoConfirm?: boolean;
 }
 
 export interface ManifestNode {

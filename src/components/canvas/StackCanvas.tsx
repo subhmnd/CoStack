@@ -46,24 +46,9 @@ export function StackCanvas() {
       );
       if (alreadyConnected) return false;
 
-      // Block connecting conflicting control panels
-      const sourceNode = nodes.find((n) => n.id === connection.source);
-      const targetNode = nodes.find((n) => n.id === connection.target);
-      if (sourceNode && targetNode) {
-        const sourceIsPanel =
-          sourceNode.data.category === "panel" ||
-          sourceNode.data.name.toLowerCase().includes("panel");
-        const targetIsPanel =
-          targetNode.data.category === "panel" ||
-          targetNode.data.name.toLowerCase().includes("panel");
-        if (sourceIsPanel && targetIsPanel) {
-          return false;
-        }
-      }
-
       return true;
     },
-    [edges, nodes]
+    [edges]
   );
 
   return (

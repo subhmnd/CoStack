@@ -87,8 +87,9 @@ export function BottomSearchBar() {
           id: searchQuery.toLowerCase().replace(/[^a-z0-9_-]/g, ""),
           name: searchQuery.trim(),
           version: "latest",
-          source: `${searchQuery.toLowerCase().replace(/[^a-z0-9_-]/g, "")}.org`,
+          source: `${searchQuery.toLowerCase().replace(/[^a-z0-9_-]/g, "")}.com`,
           sourceUrl: "",
+          command: `$PKG_INSTALL ${searchQuery.toLowerCase().replace(/[^a-z0-9_-]/g, "")}`,
         });
       }
     } else if (e.key === "Escape") {
@@ -152,8 +153,9 @@ export function BottomSearchBar() {
                     id: searchQuery.toLowerCase().replace(/[^a-z0-9_-]/g, ""),
                     name: searchQuery.trim(),
                     version: "latest",
-                    source: `${searchQuery.toLowerCase().replace(/[^a-z0-9_-]/g, "")}.org`,
+                    source: `${searchQuery.toLowerCase().replace(/[^a-z0-9_-]/g, "")}.com`,
                     sourceUrl: "",
+                    command: `$PKG_INSTALL ${searchQuery.toLowerCase().replace(/[^a-z0-9_-]/g, "")}`,
                   })
                 }
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium transition-colors shadow-sm"

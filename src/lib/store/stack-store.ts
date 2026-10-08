@@ -21,10 +21,15 @@ export interface StackCardData extends Record<string, unknown> {
   versions: string[];
   source: string;
   sourceUrl?: string;
-  category?: string;
-  hasConflict?: boolean;
-  conflictReason?: string;
   command?: string;
+  args?: string;
+  inputs?: Record<string, string>;
+  autoConfirm?: boolean;
+  // Process hierarchy (auto-defined according to process graph)
+  parentProcessName?: string;
+  parentProcessId?: string;
+  isRootProcess?: boolean;
+  stepNumber?: number;
 }
 
 export type StackNode = Node<StackCardData, "stackCard">;
@@ -55,7 +60,10 @@ export interface StackStore {
     versions?: string[];
     source: string;
     sourceUrl?: string;
-    category?: string;
+    command?: string;
+    args?: string;
+    inputs?: Record<string, string>;
+    autoConfirm?: boolean;
   }) => void;
   addSoftwareStack: (itemNames: string[]) => void;
   updateNodeData: (id: string, data: Partial<StackCardData>) => void;
@@ -66,42 +74,29 @@ export interface StackStore {
 }
 
 /**
- * Helper to evaluate and flag conflicts across active nodes
+ * Automatically defines process hierarchy based on the process flow (DAG edges).
+ * No hardcoded rules, categories, or conflicts.
  */
-function flagNodeConflicts(nodes: StackNode[]): StackNode[] {
-  // Generic conflict check for panels (cPanel, aaPanel, etc. all contain "panel" or have category "panel")
-  const panelNodes = nodes.filter(
-    (n) =>
-      n.data.category === "panel" ||
-      n.data.name.toLowerCase().includes("panel")
-  );
+function syncProcessHierarchy(nodes: StackNode[], edges: Edge[]): StackNode[] {
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const incomingMap = new Map<string, string>(); // target -> source
 
-  const hasMultiplePanels = panelNodes.length > 1;
+  for (const edge of edges) {
+    incomingMap.set(edge.target, edge.source);
+  }
 
-  return nodes.map((node) => {
-    const isPanel = panelNodes.some((p) => p.id === node.id);
-
-    if (hasMultiplePanels && isPanel) {
-      const otherPanelNames = panelNodes
-        .filter((p) => p.id !== node.id)
-        .map((p) => p.data.name)
-        .join(", ");
-      return {
-        ...node,
-        data: {
-          ...node.data,
-          hasConflict: true,
-          conflictReason: `Conflicting control panel: cannot run alongside ${otherPanelNames}`,
-        },
-      };
-    }
+  return nodes.map((node, index) => {
+    const parentId = incomingMap.get(node.id);
+    const parentNode = parentId ? nodeMap.get(parentId) : undefined;
 
     return {
       ...node,
       data: {
         ...node.data,
-        hasConflict: false,
-        conflictReason: undefined,
+        isRootProcess: !parentNode,
+        parentProcessId: parentId,
+        parentProcessName: parentNode ? parentNode.data.name : undefined,
+        stepNumber: index + 1,
       },
     };
   });
@@ -129,24 +124,23 @@ export const useStackStore = create<StackStore>((set, get) => ({
   },
 
   onEdgesChange: (changes) => {
+    const newEdges = applyEdgeChanges(changes, get().edges);
+    const updatedNodes = syncProcessHierarchy(get().nodes, newEdges);
     set({
-      edges: applyEdgeChanges(changes, get().edges),
+      edges: newEdges,
+      nodes: updatedNodes,
     });
   },
 
   onConnect: (connection: Connection) => {
-    // RULE: Exactly one connection = one relationship between the same two nodes!
-    // Disallow multiple duplicate lines between node A and node B
+    // Exactly one connection between two nodes
     const alreadyConnected = get().edges.some(
       (e) =>
         (e.source === connection.source && e.target === connection.target) ||
         (e.source === connection.target && e.target === connection.source)
     );
 
-    if (alreadyConnected) {
-      // Do not allow multiple lines between the same 2 nodes
-      return;
-    }
+    if (alreadyConnected) return;
 
     const newEdge: Edge = {
       ...connection,
@@ -165,8 +159,12 @@ export const useStackStore = create<StackStore>((set, get) => ({
       },
     };
 
+    const newEdges = addEdge(newEdge, get().edges);
+    const updatedNodes = syncProcessHierarchy(get().nodes, newEdges);
+
     set({
-      edges: addEdge(newEdge, get().edges),
+      edges: newEdges,
+      nodes: updatedNodes,
     });
   },
 
@@ -195,42 +193,39 @@ export const useStackStore = create<StackStore>((set, get) => ({
         versions: availableVersions,
         source: item.source || "",
         sourceUrl: item.sourceUrl || "",
-        category: item.category || (slugId.includes("panel") ? "panel" : "application"),
+        command: item.command || "",
+        args: item.args || "",
+        inputs: item.inputs || {},
+        autoConfirm: item.autoConfirm !== false,
       },
     };
 
     const newEdges = [...get().edges];
-    // Automatically link to previous node ONLY if they do NOT conflict
+    // Automatically link to previous process node in the pipeline
     if (count > 0) {
       const prevNode = get().nodes[count - 1];
-      const prevIsPanel = prevNode.data.category === "panel" || prevNode.data.name.toLowerCase().includes("panel");
-      const newIsPanel = newNode.data.category === "panel" || newNode.data.name.toLowerCase().includes("panel");
-      const isConflict = prevIsPanel && newIsPanel;
-
-      if (!isConflict) {
-        newEdges.push({
-          id: `edge-${prevNode.id}-${nodeId}`,
-          source: prevNode.id,
-          target: nodeId,
-          sourceHandle: "right",
-          targetHandle: "left",
-          type: "smoothstep",
-          animated: true,
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            width: 16,
-            height: 16,
-            color: "#7c3aed",
-          },
-          style: {
-            strokeWidth: 2,
-            stroke: "#7c3aed",
-          },
-        });
-      }
+      newEdges.push({
+        id: `edge-${prevNode.id}-${nodeId}`,
+        source: prevNode.id,
+        target: nodeId,
+        sourceHandle: "right",
+        targetHandle: "left",
+        type: "smoothstep",
+        animated: true,
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          width: 16,
+          height: 16,
+          color: "#7c3aed",
+        },
+        style: {
+          strokeWidth: 2,
+          stroke: "#7c3aed",
+        },
+      });
     }
 
-    const updatedNodes = flagNodeConflicts([...get().nodes, newNode]);
+    const updatedNodes = syncProcessHierarchy([...get().nodes, newNode], newEdges);
 
     set({
       nodes: updatedNodes,
@@ -274,7 +269,10 @@ export const useStackStore = create<StackStore>((set, get) => ({
           versions: ["latest"],
           source: `${slugId}.com`,
           sourceUrl: "",
-          category: slugId.includes("panel") ? "panel" : "application",
+          command: "",
+          args: "",
+          inputs: {},
+          autoConfirm: true,
         },
       });
 
@@ -302,12 +300,12 @@ export const useStackStore = create<StackStore>((set, get) => ({
       }
     });
 
-    const flaggedNodes = flagNodeConflicts(newNodes);
+    const syncedNodes = syncProcessHierarchy(newNodes, newEdges);
 
     set({
       slug: newSlug,
       stackName: itemNames.join(" + "),
-      nodes: flaggedNodes,
+      nodes: syncedNodes,
       edges: newEdges,
       searchQuery: "",
     });
@@ -329,15 +327,17 @@ export const useStackStore = create<StackStore>((set, get) => ({
     });
 
     set({
-      nodes: flagNodeConflicts(updated),
+      nodes: syncProcessHierarchy(updated, get().edges),
     });
   },
 
   deleteNode: (id: string) => {
     const remaining = get().nodes.filter((node) => node.id !== id);
+    const remainingEdges = get().edges.filter((edge) => edge.source !== id && edge.target !== id);
+
     set({
-      nodes: flagNodeConflicts(remaining),
-      edges: get().edges.filter((edge) => edge.source !== id && edge.target !== id),
+      nodes: syncProcessHierarchy(remaining, remainingEdges),
+      edges: remainingEdges,
       selectedNodeId: get().selectedNodeId === id ? null : get().selectedNodeId,
     });
   },
@@ -361,7 +361,7 @@ export const useStackStore = create<StackStore>((set, get) => ({
       },
     };
 
-    const updated = flagNodeConflicts([...get().nodes, duplicate]);
+    const updated = syncProcessHierarchy([...get().nodes, duplicate], get().edges);
 
     set({
       nodes: updated,
@@ -382,11 +382,13 @@ export const useStackStore = create<StackStore>((set, get) => ({
 
   loadFromManifest: (manifest: any) => {
     if (!manifest) return;
+    const rawNodes = manifest.nodes || [];
+    const rawEdges = manifest.edges || [];
     set({
       slug: manifest.slug || generateStackSlug(),
       stackName: manifest.name || "Loaded Stack",
-      nodes: flagNodeConflicts(manifest.nodes || []),
-      edges: manifest.edges || [],
+      nodes: syncProcessHierarchy(rawNodes, rawEdges),
+      edges: rawEdges,
       selectedNodeId: null,
     });
   },

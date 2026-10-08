@@ -11,6 +11,7 @@ function CmdCanvasController() {
   const queryParam = searchParams.get("q");
   const versionParam = searchParams.get("v");
   const sourceParam = searchParams.get("s");
+  const cmdParam = searchParams.get("cmd");
   const { addNodeFromSearch, addSoftwareStack, nodes } = useStackStore();
 
   useEffect(() => {
@@ -20,6 +21,7 @@ function CmdCanvasController() {
           name: queryParam,
           version: versionParam || "latest",
           source: sourceParam || "",
+          command: cmdParam || "",
         });
       } else {
         const items = queryParam
