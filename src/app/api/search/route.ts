@@ -23,8 +23,22 @@ const JUNK_KEYWORDS = [
   "ubuntupit", "howtoforge", "linuxhint", "tutorialspoint", "fosslinux",
   "techrepublic", "devconnected", "digitalocean", "vultr", "linode",
   "cpanelfree", "minextuts", "scribeage", "veeble", "commandlinux",
-  "supportsages", "cloudzy", "atlantic.net"
+  "supportsages", "cloudzy", "atlantic.net", "softonic", "filehorse",
+  "uptodown", "cnet.com", "download.cnet.com", "tomsguide", "softpedia", "malavida"
 ];
+
+function scoreCandidateUrl(url: string): number {
+  let score = 0;
+  if (url.endsWith(".sh") || url.endsWith(".bash")) score += 25;
+  if (url.includes("get.") || url.includes("/get/")) score += 20;
+  if (/install-script|download-script|quick-install/i.test(url)) score += 15;
+  if (/(?:linux|ubuntu|debian|centos|rocky|alma|rhel|server|engine)\b/i.test(url)) score += 10;
+  if (/(?:install|download|setup|script)/i.test(url)) score += 5;
+  if (/(?:windows|win-|macos|mac-|darwin|ios|android|desktop)\b/i.test(url) || /\.(?:exe|dmg|pkg|msi|apk)$/i.test(url)) {
+    score -= 100;
+  }
+  return score;
+}
 
 const ARTICLE_PATTERNS = [
   /^(what is|how to|why\b|pros and cons|guide to|introduction to|review|tutorial|top \d+|best \d+|install and use)/i,
@@ -315,18 +329,8 @@ export async function GET(req: NextRequest) {
     if (results.length >= 4) break;
     const cList = projectCandidatesMap.get(projectKey) || [];
 
-    // Sort candidates for this project: prioritize URLs with .sh, get., download, install, setup, script
-    cList.sort((a, b) => {
-      const aScore =
-        (a.url.endsWith(".sh") ? 15 : 0) +
-        (a.url.includes("get.") ? 8 : 0) +
-        (a.url.includes("install") || a.url.includes("download") || a.url.includes("script") ? 5 : 0);
-      const bScore =
-        (b.url.endsWith(".sh") ? 15 : 0) +
-        (b.url.includes("get.") ? 8 : 0) +
-        (b.url.includes("install") || b.url.includes("download") || b.url.includes("script") ? 5 : 0);
-      return bScore - aScore;
-    });
+    // Sort candidates for this project: prioritize URLs with .sh, get., Linux distros, and penalize non-Linux
+    cList.sort((a, b) => scoreCandidateUrl(b.url) - scoreCandidateUrl(a.url));
 
     const primary = cList[0];
     const domainBase = primary.domain.split(".")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -362,7 +366,7 @@ export async function GET(req: NextRequest) {
     let foundScript = "";
     let bestUrl = primary.url;
 
-    for (const c of cList.slice(0, 3)) {
+    for (const c of cList.slice(0, 5)) {
       if (c.url.endsWith(".sh")) {
         const rawUrl = normalizeScriptUrl(c.url);
         foundScript = `curl -fsSL ${rawUrl} | bash`;
