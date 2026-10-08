@@ -59,7 +59,7 @@ export function generateBashInstaller(manifest: CoStackManifest): string {
       // If parent is container runtime and command isn't already a docker command, auto-wrap or run
       if (parentIsContainer && parentSlug && !execCmd.startsWith("docker") && !execCmd.startsWith("podman")) {
         const escapedSubCmd = execCmd.replace(/"/g, '\\"');
-        execCmd = `if docker ps -q -f name="^${parentSlug}$" 2>/dev/null | grep -q .; then docker exec "${parentSlug}" sh -c "${escapedSubCmd}"; else (${execCmd}); fi`;
+        execCmd = `if docker ps -q -f name="^${parentSlug}$" 2>/dev/null | grep -q .; then docker exec -i "${parentSlug}" sh -c "${escapedSubCmd}"; else (${execCmd}); fi`;
       }
 
       // Build execution block: handle piped scripts (curl/wget | bash) cleanly with auto-confirm
@@ -73,8 +73,8 @@ export function generateBashInstaller(manifest: CoStackManifest): string {
         runScript = `_STEP_TMP=\$(mktemp /tmp/costack_XXXXXX.sh)
 curl ${curlArgs} -o "\$_STEP_TMP"
 chmod +x "\$_STEP_TMP"
-${autoConfirm ? `yes 2>/dev/null | bash "\$_STEP_TMP" ${bashSuffix}` : `bash "\$_STEP_TMP" ${bashSuffix}`}
-_STEP_STATUS=\$?
+_STEP_STATUS=0
+${autoConfirm ? `(set +o pipefail; yes 2>/dev/null | bash "\$_STEP_TMP" ${bashSuffix}) || _STEP_STATUS=\$?` : `bash "\$_STEP_TMP" ${bashSuffix} || _STEP_STATUS=\$?`}
 rm -f "\$_STEP_TMP"
 if [ \$_STEP_STATUS -ne 0 ]; then
   echo -e "\${RED}Error: Process Step ${stepNum} [${rawName}] failed with exit code \$_STEP_STATUS. Aborting stack.\${NC}" >&2
@@ -86,23 +86,29 @@ fi`;
         runScript = `_STEP_TMP=\$(mktemp /tmp/costack_XXXXXX.sh)
 wget ${wgetArgs} -O "\$_STEP_TMP"
 chmod +x "\$_STEP_TMP"
-${autoConfirm ? `yes 2>/dev/null | bash "\$_STEP_TMP" ${bashSuffix}` : `bash "\$_STEP_TMP" ${bashSuffix}`}
-_STEP_STATUS=\$?
+_STEP_STATUS=0
+${autoConfirm ? `(set +o pipefail; yes 2>/dev/null | bash "\$_STEP_TMP" ${bashSuffix}) || _STEP_STATUS=\$?` : `bash "\$_STEP_TMP" ${bashSuffix} || _STEP_STATUS=\$?`}
 rm -f "\$_STEP_TMP"
 if [ \$_STEP_STATUS -ne 0 ]; then
   echo -e "\${RED}Error: Process Step ${stepNum} [${rawName}] failed with exit code \$_STEP_STATUS. Aborting stack.\${NC}" >&2
   exit 1
 fi`;
       } else {
-        const finalCmd = autoConfirm && !execCmd.includes("-y") && !execCmd.includes("yes")
-          ? `yes 2>/dev/null | (${execCmd}) || (${execCmd})`
-          : execCmd;
-        runScript = `${finalCmd}
+        if (autoConfirm && !execCmd.includes("-y") && !execCmd.includes("yes")) {
+          runScript = `_STEP_STATUS=0
+(set +o pipefail; yes 2>/dev/null | (${execCmd})) || _STEP_STATUS=\$?
+if [ \$_STEP_STATUS -ne 0 ]; then
+  echo -e "\${RED}Error: Process Step ${stepNum} [${rawName}] failed with exit code \$_STEP_STATUS. Aborting stack.\${NC}" >&2
+  exit 1
+fi`;
+        } else {
+          runScript = `${execCmd}
 
 if [ $? -ne 0 ]; then
   echo -e "\${RED}Error: Process Step ${stepNum} [${rawName}] failed with exit code $?. Aborting stack.\${NC}" >&2
   exit 1
 fi`;
+        }
       }
 
       const contextLabel = parentName
