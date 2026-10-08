@@ -171,6 +171,16 @@ function extractGenericCommand(rawHtml: string, pageUrl: string): string | null 
     return normalizeScriptUrl(lines.join(" && "));
   }
 
+  // Panel internal script execution (e.g. /bin/bash /www/server/panel/install/install_soft.sh 0 install ... or /usr/local/cpanel/scripts/...)
+  const panelCmdMatch = text.match(/(?:\/bin\/bash|bash)\s+\/www\/server\/panel\/install\/[a-zA-Z0-9_\.-]+\.sh\s+[a-zA-Z0-9_\.-]+(?:\s+[a-zA-Z0-9_\.-]+)*/i);
+  if (panelCmdMatch) {
+    return panelCmdMatch[0].trim();
+  }
+  const cpanelCmdMatch = text.match(/\/usr\/local\/cpanel\/scripts\/[a-zA-Z0-9_\.-]+(?:\s+[^\n<`"'\$]+)?/i);
+  if (cpanelCmdMatch) {
+    return cpanelCmdMatch[0].trim();
+  }
+
   // Direct link to a shell script file (.sh or .bash) on the page
   const shLinkMatch = rawHtml.match(/href=["']([^"']+\.(?:sh|bash))["']/i);
   if (shLinkMatch) {
@@ -183,15 +193,92 @@ function extractGenericCommand(rawHtml: string, pageUrl: string): string | null 
   return null;
 }
 
-export async function resolveSoftware(query: string, noCache = false): Promise<SearchResultItem[]> {
-  const cleanQuery = query.trim();
+/**
+ * Live Docker Hub Search API resolver for container contexts
+ */
+async function resolveDockerHubSoftware(query: string): Promise<SearchResultItem[]> {
+  try {
+    const cleanQ = query.toLowerCase().trim();
+    const url = `https://hub.docker.com/v2/search/repositories/?query=${encodeURIComponent(cleanQ)}&page_size=4`;
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+      },
+    });
+    clearTimeout(tid);
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!data.results || data.results.length === 0) return [];
+
+    return data.results.slice(0, 4).map((r: any) => {
+      const isOfficial = r.is_official === true;
+      const repoName = r.repo_name;
+      const shortName = repoName.includes("/") ? repoName.split("/")[1] : repoName;
+      const cleanSlug = repoName.replace(/[^a-z0-9_-]/g, "-");
+      const displayName = isOfficial
+        ? `${shortName.charAt(0).toUpperCase() + shortName.slice(1)} (Official Docker Container)`
+        : `${repoName} (Docker Container)`;
+
+      return {
+        id: `docker-${cleanSlug}`,
+        name: displayName,
+        version: "latest",
+        versions: ["latest", "alpine", "stable"],
+        source: isOfficial ? `hub.docker.com/_/${repoName}` : `hub.docker.com/r/${repoName}`,
+        sourceUrl: `https://hub.docker.com/${isOfficial ? "_/" : "r/"}${repoName}`,
+        command: `docker run -d --name "${shortName}" --restart always "${repoName}:latest"`,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function resolveSoftware(
+  query: string,
+  noCache = false,
+  parentContext?: string
+): Promise<SearchResultItem[]> {
+  let cleanQuery = query.trim();
+  let activeParent = parentContext?.trim() || "";
+
+  // Support inline combo queries like "cpanel + php" or "docker + php"
+  if (cleanQuery.includes("+")) {
+    const parts = cleanQuery.split("+");
+    if (parts.length >= 2 && parts[0].trim()) {
+      activeParent = parts[0].trim();
+      cleanQuery = parts.slice(1).join(" ").trim();
+    }
+  }
+
   if (!cleanQuery) return [];
 
-  const cacheKey = cleanQuery.toLowerCase();
+  const cacheKey = activeParent
+    ? `${activeParent.toLowerCase()}:${cleanQuery.toLowerCase()}`
+    : cleanQuery.toLowerCase();
+
   const cached = searchCache.get(cacheKey);
   if (!noCache && cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return cached.data;
   }
+
+  // 1. Container runtime context: query Docker Hub directly
+  if (activeParent && /docker|podman|container/i.test(activeParent)) {
+    const dockerHubResults = await resolveDockerHubSoftware(cleanQuery);
+    if (dockerHubResults.length > 0) {
+      searchCache.set(cacheKey, { data: dockerHubResults, timestamp: Date.now() });
+      return dockerHubResults;
+    }
+  }
+
+  // 2. Control panel context: query panel-specific official documentation / scripts
+  const isPanelContext = Boolean(activeParent && !/host|system|native|linux/i.test(activeParent));
+  const effectiveQuery = isPanelContext
+    ? `${activeParent} ${cleanQuery}`
+    : cleanQuery;
 
   interface Candidate {
     title: string;
@@ -205,7 +292,10 @@ export async function resolveSoftware(query: string, noCache = false): Promise<S
   // 1. DuckDuckGo Search
   const fetchDDGHtml = async () => {
     try {
-      const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(cleanQuery + " install script")}`;
+      const searchTerms = isPanelContext
+        ? `${activeParent} ${cleanQuery} install script`
+        : `${cleanQuery} install script`;
+      const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchTerms)}`;
       const res = await fetch(ddgUrl, {
         headers: {
           "User-Agent":
@@ -246,7 +336,10 @@ export async function resolveSoftware(query: string, noCache = false): Promise<S
   // 2. Bing Search
   const fetchBing = async () => {
     try {
-      const bingUrl = `https://www.bing.com/search?q=${encodeURIComponent(cleanQuery + " official linux install script")}&setlang=en&mkt=en-US`;
+      const bingQuery = isPanelContext
+        ? `${activeParent} ${cleanQuery} install script cli`
+        : `${cleanQuery} official linux install script`;
+      const bingUrl = `https://www.bing.com/search?q=${encodeURIComponent(bingQuery)}&setlang=en&mkt=en-US`;
       const res = await fetch(bingUrl, {
         headers: {
           "User-Agent":
@@ -458,12 +551,34 @@ export async function resolveSoftware(query: string, noCache = false): Promise<S
       } catch {}
     }
 
-    const finalCmd = foundScript || `$PKG_INSTALL ${cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, "")}`;
-    const displayDomain = projectKey.startsWith("github.com/") ? projectKey : primary.domain;
+    let finalCmd = foundScript;
+    if (!finalCmd && isPanelContext) {
+      const pLow = activeParent.toLowerCase();
+      if (pLow.includes("aapanel") || pLow.includes("bt.cn")) {
+        finalCmd = `/bin/bash /www/server/panel/install/install_soft.sh 0 install ${cleanName.toLowerCase().replace(/[^a-z0-9_]/g, "")}`;
+      } else if (pLow.includes("cpanel")) {
+        finalCmd = `/usr/local/cpanel/scripts/ea4_metainstaller --install ${cleanName.toLowerCase().replace(/[^a-z0-9_]/g, "")}`;
+      } else if (pLow.includes("plesk")) {
+        finalCmd = `plesk bin extension --install ${cleanName.toLowerCase().replace(/[^a-z0-9_]/g, "")}`;
+      } else {
+        finalCmd = `${activeParent.toLowerCase()} install ${cleanName.toLowerCase().replace(/[^a-z0-9_]/g, "")}`;
+      }
+    }
+    if (!finalCmd) {
+      finalCmd = `$PKG_INSTALL ${cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, "")}`;
+    }
+
+    const displayName = isPanelContext && !cleanName.toLowerCase().includes(activeParent.toLowerCase())
+      ? `${cleanName} (${activeParent} Module)`
+      : cleanName;
+
+    const displayDomain = isPanelContext
+      ? (primary.domain.includes(activeParent.toLowerCase()) ? primary.domain : `${activeParent.toLowerCase()}.com`)
+      : (projectKey.startsWith("github.com/") ? projectKey : primary.domain);
 
     results.push({
       id: projectKey.replace(/[^a-z0-9]/gi, "-"),
-      name: cleanName,
+      name: displayName,
       version: parsedVersion,
       versions: Array.from(new Set([parsedVersion, "latest", "stable", "lts"])),
       source: displayDomain,

@@ -201,12 +201,16 @@ export const useStackStore = create<StackStore>((set, get) => ({
     };
 
     const newEdges = [...get().edges];
-    // Automatically link to previous process node in the pipeline
-    if (count > 0) {
-      const prevNode = get().nodes[count - 1];
+    // If a node is actively selected, link directly from that parent process, otherwise link to previous node
+    const selectedParent = get().selectedNodeId
+      ? get().nodes.find((n) => n.id === get().selectedNodeId)
+      : null;
+    const parentToLink = selectedParent || (count > 0 ? get().nodes[count - 1] : null);
+
+    if (parentToLink) {
       newEdges.push({
-        id: `edge-${prevNode.id}-${nodeId}`,
-        source: prevNode.id,
+        id: `edge-${parentToLink.id}-${nodeId}`,
+        source: parentToLink.id,
         target: nodeId,
         sourceHandle: "right",
         targetHandle: "left",
