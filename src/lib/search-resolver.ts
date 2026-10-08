@@ -172,7 +172,7 @@ function extractGenericCommand(rawHtml: string, pageUrl: string): string | null 
   }
 
   // Panel internal script execution (e.g. /bin/bash /www/server/panel/install/install_soft.sh 0 install ... or /usr/local/cpanel/scripts/...)
-  const panelCmdMatch = text.match(/(?:\/bin\/bash|bash)\s+\/www\/server\/panel\/install\/[a-zA-Z0-9_\.-]+\.sh\s+[a-zA-Z0-9_\.-]+(?:\s+[a-zA-Z0-9_\.-]+)*/i);
+  const panelCmdMatch = text.match(/(?:\/bin\/bash|bash)\s+\/www\/server\/panel\/install\/[a-zA-Z0-9_\.-]+\.sh\s+(?:0\s+)?install(?:\s+[a-zA-Z0-9_\.-]+)*/i);
   if (panelCmdMatch) {
     return panelCmdMatch[0].trim();
   }
@@ -245,12 +245,19 @@ export async function resolveSoftware(
   let cleanQuery = query.trim();
   let activeParent = parentContext?.trim() || "";
 
-  // Support inline combo queries like "cpanel + php" or "docker + php"
+  // Support inline combo queries like "cpanel + php" or "docker + php" or "cpanel php"
   if (cleanQuery.includes("+")) {
     const parts = cleanQuery.split("+");
     if (parts.length >= 2 && parts[0].trim()) {
       activeParent = parts[0].trim();
       cleanQuery = parts.slice(1).join(" ").trim();
+    }
+  } else if (!activeParent && cleanQuery.includes(" ")) {
+    const firstWord = cleanQuery.split(" ")[0].toLowerCase();
+    const remaining = cleanQuery.split(" ").slice(1).join(" ").trim();
+    if (["docker", "podman", "cpanel", "aapanel", "plesk", "cyberpanel", "directadmin", "hestiacp"].includes(firstWord) && remaining) {
+      activeParent = firstWord;
+      cleanQuery = remaining;
     }
   }
 
