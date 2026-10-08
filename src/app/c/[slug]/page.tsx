@@ -5,6 +5,7 @@ import { getStackBySlug } from "@/lib/stack-service";
 import { generateStackManifest } from "@/lib/executor/manifest-generator";
 import { generateBashInstaller } from "@/lib/executor/bash-generator";
 import { createSoftwareNodeData } from "@/lib/stack-parser";
+import { resolveSoftware } from "@/lib/search-resolver";
 import { StackViewerClient } from "./StackViewerClient";
 
 interface PageProps {
@@ -27,6 +28,22 @@ export default async function StackDefinitionPage({ params }: PageProps) {
   let bashScript = "";
 
   if (saved) {
+    if (saved.manifestJson?.nodes?.length) {
+      await Promise.all(
+        saved.manifestJson.nodes.map(async (n: any) => {
+          if (!n.data.command || n.data.command.startsWith("$PKG_INSTALL")) {
+            try {
+              const res = await resolveSoftware(n.data.name);
+              if (res.length > 0 && res[0].command && !res[0].command.startsWith("$PKG_INSTALL")) {
+                n.data.command = res[0].command;
+                n.data.source = res[0].source || n.data.source;
+                n.data.sourceUrl = res[0].sourceUrl || n.data.sourceUrl;
+              }
+            } catch {}
+          }
+        })
+      );
+    }
     manifest = saved.manifestJson;
     jsonString = JSON.stringify(saved.manifestJson, null, 2);
     yamlString = saved.manifestYaml;
@@ -38,17 +55,28 @@ export default async function StackDefinitionPage({ params }: PageProps) {
     const parts = slug.split("-");
     const rawNames = parts.length > 1 ? parts.slice(0, -1) : parts;
 
-    const nodes = rawNames.map((name, i) => {
-      const data = createSoftwareNodeData(name);
-      return {
-        id: `node-${i}`,
-        position: { x: i * 260, y: 150 },
-        data: {
-          ...data,
-          label: data.name,
-        },
-      };
-    });
+    const nodes = await Promise.all(
+      rawNames.map(async (name, i) => {
+        const data = createSoftwareNodeData(name);
+        try {
+          const res = await resolveSoftware(name);
+          if (res.length > 0 && res[0].command) {
+            data.command = res[0].command;
+            data.source = res[0].source || data.source;
+            data.sourceUrl = res[0].sourceUrl || data.sourceUrl;
+          }
+        } catch {}
+
+        return {
+          id: `node-${i}`,
+          position: { x: i * 260, y: 150 },
+          data: {
+            ...data,
+            label: data.name,
+          },
+        };
+      })
+    );
 
     const edges = nodes.slice(1).map((node, i) => ({
       id: `edge-${i}-${i + 1}`,
