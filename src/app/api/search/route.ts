@@ -69,9 +69,20 @@ function isJunkDomainOrTitle(domain: string, title: string): boolean {
  * Purely generic extraction of installer commands from webpage text.
  * No hardcoded software names or domains.
  */
+function normalizeScriptUrl(url: string): string {
+  if (url.includes("github.com") && url.includes("/blob/")) {
+    return url.replace("https://github.com/", "https://raw.githubusercontent.com/").replace("/blob/", "/");
+  }
+  return url;
+}
+
+/**
+ * Purely generic extraction of installer commands from webpage text.
+ * No hardcoded software names or domains.
+ */
 function extractGenericCommand(rawHtml: string, pageUrl: string): string | null {
   if (rawHtml.trim().startsWith("#!/bin/sh") || rawHtml.trim().startsWith("#!/bin/bash")) {
-    return `curl -fsSL ${pageUrl} | sh`;
+    return `curl -fsSL ${normalizeScriptUrl(pageUrl)} | bash`;
   }
 
   const text = rawHtml
@@ -81,29 +92,52 @@ function extractGenericCommand(rawHtml: string, pageUrl: string): string | null 
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">");
 
+  // Check code / pre blocks first (authoritative on developer docs / github)
+  const codeBlocks = text.match(/<(?:pre|code)[^>]*>([\s\S]*?)<\/(?:pre|code)>/gi) || [];
+  for (const cb of codeBlocks) {
+    const clean = cb.replace(/<[^>]+>/g, "").trim();
+    if (
+      (clean.includes("curl") || clean.includes("wget")) &&
+      (clean.includes(".sh") || clean.includes("|") || clean.includes("bash") || clean.includes("sh"))
+    ) {
+      const lines = clean.split("\n").map((l) => l.trim()).filter(Boolean);
+      let joined = lines.join(" && ");
+      if (joined.includes("chmod +x") && !joined.includes("./")) {
+        const shMatch = joined.match(/chmod\s+\+x\s+([^\s;&]+\.sh)/);
+        if (shMatch) {
+          joined = `${joined} && ./${shMatch[1]}`;
+        }
+      }
+      return normalizeScriptUrl(joined);
+    }
+  }
+
   // Pipe pattern: curl/wget ... | [sudo] bash/sh
   const pipeMatch = text.match(/(?:curl|wget)\s+[^\n<`"'\$]+(?:\|\s*(?:sudo\s+)?(?:bash|sh))/i);
   if (pipeMatch) {
-    return pipeMatch[0].replace(/<[^>]+>/g, "").trim();
+    return normalizeScriptUrl(pipeMatch[0].replace(/<[^>]+>/g, "").trim());
   }
 
   // Chained download + execute: curl/wget ... && [sudo] bash/sh ...
   const seqMatch = text.match(/(?:curl|wget)\s+[^\n<`"'\$]+(?:&&|;)\s*(?:sudo\s+)?(?:bash|sh)\s+[^\s<"';&]+/i);
   if (seqMatch) {
-    return seqMatch[0].replace(/<[^>]+>/g, "").trim();
-  }
-
-  // Chained download + chmod + exec: curl/wget -O <url.sh> && chmod +x <script.sh> && ./<script.sh>
-  const chmodMatch = text.match(/(?:curl|wget)\s+[^\n<`"'\$]+\.sh(?:\s*&&\s*|\n)chmod\s+\+x\s+[^\s<"';&]+\.sh(?:\s*&&\s*|\n)(?:\.\/[^\s<"';&]+\.sh)/i);
-  if (chmodMatch) {
-    return chmodMatch[0].replace(/\n/g, " && ").replace(/<[^>]+>/g, "").trim();
+    return normalizeScriptUrl(seqMatch[0].replace(/<[^>]+>/g, "").trim());
   }
 
   // Multi-line download and run: curl -o <name> -L <url> ... sh <name>
   const dlRunMatch = text.match(/curl\s+-[a-zA-Z]+\s+([a-zA-Z0-9_\.-]+)\s+-L\s+[^\s<"';&]+[\s\S]{1,100}?\bsh\s+\1/i);
   if (dlRunMatch) {
     const lines = dlRunMatch[0].split("\n").map((l) => l.trim()).filter(Boolean);
-    return lines.join(" && ");
+    return normalizeScriptUrl(lines.join(" && "));
+  }
+
+  // Direct link to a shell script file (.sh or .bash) on the page
+  const shLinkMatch = rawHtml.match(/href=["']([^"']+\.(?:sh|bash))["']/i);
+  if (shLinkMatch) {
+    try {
+      const resolved = new URL(shLinkMatch[1], pageUrl).toString();
+      return `curl -fsSL ${normalizeScriptUrl(resolved)} | bash`;
+    } catch {}
   }
 
   return null;
@@ -122,88 +156,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ results: cached.data });
   }
 
-  const results: SearchResultItem[] = [];
-  const seenDomains = new Set<string>();
-  const seenNames = new Set<string>();
+  interface Candidate {
+    title: string;
+    domain: string;
+    url: string;
+  }
 
-  const addResult = (
-    rawTitle: string,
-    rawDomain: string,
-    realUrl: string,
-    foundCommand = ""
-  ) => {
-    let cleanDomain = rawDomain
-      .toLowerCase()
-      .replace(/^https?:\/\//, "")
-      .replace(/^www\./, "")
-      .split(/[›/\s]/)[0]
-      .trim();
-
-    if (!cleanDomain || seenDomains.has(cleanDomain)) return;
-    if (isJunkDomainOrTitle(cleanDomain, rawTitle)) return;
-
-    if (cleanDomain.includes("github.com")) {
-      if (rawTitle.toLowerCase().startsWith("github") && results.length > 0) {
-        return;
-      }
-    }
-
-    seenDomains.add(cleanDomain);
-
-    const queryClean = query.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const domainBase = cleanDomain.split(".")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
-
-    let cleanName = query.charAt(0).toUpperCase() + query.slice(1);
-
-    if (domainBase === queryClean || cleanDomain.startsWith(queryClean + ".")) {
-      const m = rawTitle.match(new RegExp(`\\b(${query})\\b`, "i"));
-      cleanName = m ? m[0] : cleanName;
-    } else if (cleanDomain.includes("github.com")) {
-      try {
-        const pathParts = new URL(realUrl).pathname.split("/").filter(Boolean);
-        if (pathParts.length >= 2) {
-          cleanName = pathParts[1].replace(/[-_]/g, " ");
-        }
-      } catch {
-        // keep cleanName
-      }
-    } else {
-      const parts = rawTitle.split(/[|\-:–]/).map((p) => p.trim());
-      const matchPart = parts.find((p) => p.toLowerCase().includes(query.toLowerCase()));
-      if (matchPart && matchPart.length < 25) {
-        cleanName = matchPart.replace(/(download|free|official|linux|install)\s*/gi, "").trim() || cleanName;
-      }
-    }
-
-    const normKey = cleanName.toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (seenNames.has(normKey)) return;
-    seenNames.add(normKey);
-
-    const titleWithoutDistro = rawTitle.replace(/\b(ubuntu|debian|centos|fedora|rocky|alma|rhel|linux)\s*\d+(\.\d+)*/gi, "");
-    const vMatch = titleWithoutDistro.match(/v?(\d+\.\d+(\.\d+)?)/);
-    const parsedVersion = vMatch ? vMatch[1] : "latest";
-
-    const versions = Array.from(new Set([parsedVersion, "latest", "stable", "lts"]));
-
-    let command = foundCommand;
-    if (!command) {
-      if (realUrl.endsWith(".sh")) {
-        command = `curl -fsSL ${realUrl} | bash`;
-      } else {
-        command = `$PKG_INSTALL ${cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, "")}`;
-      }
-    }
-
-    results.push({
-      id: cleanDomain.replace(/[^a-z0-9]/gi, "-"),
-      name: cleanName,
-      version: parsedVersion,
-      versions,
-      source: cleanDomain,
-      sourceUrl: realUrl,
-      command,
-    });
-  };
+  const rawCandidates: Candidate[] = [];
 
   // 1. Query DuckDuckGo HTML Search
   const fetchDDGHtml = async () => {
@@ -222,7 +181,6 @@ export async function GET(req: NextRequest) {
       const resultBlocks = html.match(/<div class="result results_links[^"]*"[\s\S]*?<\/div>\s*<\/div>/g) || [];
 
       for (const block of resultBlocks) {
-        if (results.length >= 4) break;
         const linkMatch = block.match(/<a class="result__url"[^>]*href="([^"]+)"/);
         const titleMatch = block.match(/<h2 class="result__title">[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/);
 
@@ -233,12 +191,14 @@ export async function GET(req: NextRequest) {
 
           let domain = "";
           try {
-            domain = new URL(realUrl).hostname;
+            domain = new URL(realUrl).hostname.toLowerCase().replace(/^www\./, "");
           } catch {
             continue;
           }
 
-          addResult(rawTitle, domain, realUrl);
+          if (isJunkDomainOrTitle(domain, rawTitle)) continue;
+
+          rawCandidates.push({ title: rawTitle, domain, url: realUrl });
         }
       }
     } catch (err) {
@@ -262,7 +222,6 @@ export async function GET(req: NextRequest) {
       const algos = html.match(/<li class="b_algo"[\s\S]*?<\/li>/g) || [];
 
       for (const item of algos) {
-        if (results.length >= 4) break;
         const titleMatch = item.match(/<h2[^>]*><a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a><\/h2>/);
         const domainMatch =
           item.match(/<div class="tptt">([^<]+)<\/div>/) ||
@@ -272,9 +231,17 @@ export async function GET(req: NextRequest) {
           const rawHref = titleMatch[1];
           const realUrl = decodeBingUrl(rawHref);
           const rawTitle = titleMatch[2].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim();
-          const rawDomain = domainMatch[1].replace(/<[^>]+>/g, "").trim();
 
-          addResult(rawTitle, rawDomain, realUrl);
+          let domain = "";
+          try {
+            domain = new URL(realUrl).hostname.toLowerCase().replace(/^www\./, "");
+          } catch {
+            continue;
+          }
+
+          if (isJunkDomainOrTitle(domain, rawTitle)) continue;
+
+          rawCandidates.push({ title: rawTitle, domain, url: realUrl });
         }
       }
     } catch (err) {
@@ -284,33 +251,110 @@ export async function GET(req: NextRequest) {
 
   await Promise.allSettled([fetchDDGHtml(), fetchBing()]);
 
-  // Deep inspect candidate websites to retrieve exact script dynamically
-  const deepScanPromises = results.map(async (item) => {
-    if (item.command && !item.command.startsWith("$PKG_INSTALL")) return;
-    try {
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 2500);
-      const res = await fetch(item.sourceUrl, {
-        signal: controller.signal,
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        },
-      });
-      clearTimeout(tid);
-      if (!res.ok) return;
+  // Group candidate URLs by software domain / project
+  const domainCandidatesMap = new Map<string, Candidate[]>();
+  for (const c of rawCandidates) {
+    const list = domainCandidatesMap.get(c.domain) || [];
+    list.push(c);
+    domainCandidatesMap.set(c.domain, list);
+  }
 
-      const text = await res.text();
-      const found = extractGenericCommand(text, item.sourceUrl);
-      if (found) {
-        item.command = found;
+  // Scan top candidate pages dynamically to discover official scripts
+  const results: SearchResultItem[] = [];
+  const seenNames = new Set<string>();
+
+  for (const [domain, cList] of domainCandidatesMap.entries()) {
+    if (results.length >= 4) break;
+
+    // Sort candidates for this domain: prioritize URLs with .sh, download, install, setup, script, get.
+    cList.sort((a, b) => {
+      const aScore =
+        (a.url.endsWith(".sh") ? 10 : 0) +
+        (a.url.includes("install") || a.url.includes("download") || a.url.includes("get.") || a.url.includes("script") ? 5 : 0);
+      const bScore =
+        (b.url.endsWith(".sh") ? 10 : 0) +
+        (b.url.includes("install") || b.url.includes("download") || b.url.includes("get.") || b.url.includes("script") ? 5 : 0);
+      return bScore - aScore;
+    });
+
+    const primary = cList[0];
+    const queryClean = query.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const domainBase = domain.split(".")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+
+    let cleanName = query.charAt(0).toUpperCase() + query.slice(1);
+    if (domainBase === queryClean || domain.startsWith(queryClean + ".")) {
+      const m = primary.title.match(new RegExp(`\\b(${query})\\b`, "i"));
+      cleanName = m ? m[0] : cleanName;
+    } else if (domain.includes("github.com")) {
+      try {
+        const pathParts = new URL(primary.url).pathname.split("/").filter(Boolean);
+        if (pathParts.length >= 2) {
+          cleanName = pathParts[1].replace(/[-_]/g, " ");
+        }
+      } catch {}
+    } else {
+      const parts = primary.title.split(/[|\-:–]/).map((p) => p.trim());
+      const matchPart = parts.find((p) => p.toLowerCase().includes(query.toLowerCase()));
+      if (matchPart && matchPart.length < 25) {
+        cleanName = matchPart.replace(/(download|free|official|linux|install)\s*/gi, "").trim() || cleanName;
       }
-    } catch {
-      // Ignore network timeout
     }
-  });
 
-  await Promise.allSettled(deepScanPromises);
+    const normKey = cleanName.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (seenNames.has(normKey)) continue;
+    seenNames.add(normKey);
+
+    const titleWithoutDistro = primary.title.replace(/\b(ubuntu|debian|centos|fedora|rocky|alma|rhel|linux)\s*\d+(\.\d+)*/gi, "");
+    const vMatch = titleWithoutDistro.match(/v?(\d+\.\d+(\.\d+)?)/);
+    const parsedVersion = vMatch ? vMatch[1] : "latest";
+
+    // Scan the candidate URLs for this domain to find the official script
+    let foundScript = "";
+    let bestUrl = primary.url;
+
+    for (const c of cList.slice(0, 3)) {
+      if (c.url.endsWith(".sh")) {
+        const rawUrl = normalizeScriptUrl(c.url);
+        foundScript = `curl -fsSL ${rawUrl} | bash`;
+        bestUrl = rawUrl;
+        break;
+      }
+
+      try {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 2500);
+        const res = await fetch(c.url, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          },
+        });
+        clearTimeout(tid);
+        if (!res.ok) continue;
+
+        const text = await res.text();
+        const cmd = extractGenericCommand(text, c.url);
+        if (cmd) {
+          foundScript = cmd;
+          bestUrl = c.url;
+          break;
+        }
+      } catch {}
+    }
+
+    const finalCmd = foundScript || `$PKG_INSTALL ${cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, "")}`;
+
+    results.push({
+      id: domain.replace(/[^a-z0-9]/gi, "-"),
+      name: cleanName,
+      version: parsedVersion,
+      versions: Array.from(new Set([parsedVersion, "latest", "stable", "lts"])),
+      source: domain,
+      sourceUrl: bestUrl,
+      command: finalCmd,
+    });
+  }
 
   // Prioritize exact match on query
   const queryClean = query.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -323,7 +367,7 @@ export async function GET(req: NextRequest) {
   });
 
   const finalResults = results.slice(0, 4);
-
   searchCache.set(cacheKey, { data: finalResults, timestamp: Date.now() });
+
   return NextResponse.json({ results: finalResults });
 }

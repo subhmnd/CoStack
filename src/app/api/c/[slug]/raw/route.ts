@@ -12,14 +12,19 @@ export async function GET(
 
   // 1. Retrieve exact saved stack configured on the canvas
   const saved = await getStackBySlug(slug);
-  if (saved && saved.bashScript) {
-    return new Response(saved.bashScript, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-cache, no-store, max-age=0, must-revalidate",
-      },
-    });
+  if (saved) {
+    const script = saved.manifestJson?.nodes?.length
+      ? generateBashInstaller(saved.manifestJson)
+      : saved.bashScript;
+    if (script) {
+      return new Response(script, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-cache, no-store, max-age=0, must-revalidate",
+        },
+      });
+    }
   }
 
   // 2. Dynamic fallback if accessed directly from slug without saving

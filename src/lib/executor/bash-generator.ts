@@ -59,13 +59,51 @@ export function generateBashInstaller(manifest: CoStackManifest): string {
       // If parent is container runtime and command isn't already a docker command, auto-wrap or run
       if (parentIsContainer && parentSlug && !execCmd.startsWith("docker") && !execCmd.startsWith("podman")) {
         const escapedSubCmd = execCmd.replace(/"/g, '\\"');
-        execCmd = `docker exec "${parentSlug}" sh -c "${escapedSubCmd}" 2>/dev/null || (${execCmd})`;
+        execCmd = `if docker ps -q -f name="^${parentSlug}$" 2>/dev/null | grep -q .; then docker exec "${parentSlug}" sh -c "${escapedSubCmd}"; else (${execCmd}); fi`;
       }
 
-      // If auto-confirm is enabled, pipe yes to answer interactive prompts
-      const finalCmd = autoConfirm && !execCmd.includes("-y") && !execCmd.includes("yes")
-        ? `yes 2>/dev/null | (${execCmd}) || (${execCmd})`
-        : execCmd;
+      // Build execution block: handle piped scripts (curl/wget | bash) cleanly with auto-confirm
+      let runScript = "";
+      const curlPipeMatch = execCmd.match(/^(?:sudo\s+)?curl\s+([^\n|]+?)\s*\|\s*(?:sudo\s+)?(?:bash|sh)(.*)$/i);
+      const wgetPipeMatch = execCmd.match(/^(?:sudo\s+)?wget\s+([^\n|]+?)\s*\|\s*(?:sudo\s+)?(?:bash|sh)(.*)$/i);
+
+      if (curlPipeMatch) {
+        const curlArgs = curlPipeMatch[1].trim();
+        const bashSuffix = curlPipeMatch[2].trim();
+        runScript = `_STEP_TMP=\$(mktemp /tmp/costack_XXXXXX.sh)
+curl ${curlArgs} -o "\$_STEP_TMP"
+chmod +x "\$_STEP_TMP"
+${autoConfirm ? `yes 2>/dev/null | bash "\$_STEP_TMP" ${bashSuffix}` : `bash "\$_STEP_TMP" ${bashSuffix}`}
+_STEP_STATUS=\$?
+rm -f "\$_STEP_TMP"
+if [ \$_STEP_STATUS -ne 0 ]; then
+  echo -e "\${RED}Error: Process Step ${stepNum} [${rawName}] failed with exit code \$_STEP_STATUS. Aborting stack.\${NC}" >&2
+  exit 1
+fi`;
+      } else if (wgetPipeMatch) {
+        const wgetArgs = wgetPipeMatch[1].replace(/-O\s*-|-qO-/i, "").trim();
+        const bashSuffix = wgetPipeMatch[2].trim();
+        runScript = `_STEP_TMP=\$(mktemp /tmp/costack_XXXXXX.sh)
+wget ${wgetArgs} -O "\$_STEP_TMP"
+chmod +x "\$_STEP_TMP"
+${autoConfirm ? `yes 2>/dev/null | bash "\$_STEP_TMP" ${bashSuffix}` : `bash "\$_STEP_TMP" ${bashSuffix}`}
+_STEP_STATUS=\$?
+rm -f "\$_STEP_TMP"
+if [ \$_STEP_STATUS -ne 0 ]; then
+  echo -e "\${RED}Error: Process Step ${stepNum} [${rawName}] failed with exit code \$_STEP_STATUS. Aborting stack.\${NC}" >&2
+  exit 1
+fi`;
+      } else {
+        const finalCmd = autoConfirm && !execCmd.includes("-y") && !execCmd.includes("yes")
+          ? `yes 2>/dev/null | (${execCmd}) || (${execCmd})`
+          : execCmd;
+        runScript = `${finalCmd}
+
+if [ $? -ne 0 ]; then
+  echo -e "\${RED}Error: Process Step ${stepNum} [${rawName}] failed with exit code $?. Aborting stack.\${NC}" >&2
+  exit 1
+fi`;
+      }
 
       const contextLabel = parentName
         ? `under [${parentName}]`
@@ -77,12 +115,7 @@ export function generateBashInstaller(manifest: CoStackManifest): string {
 # ------------------------------------------------------------------------------
 echo -e "\${CYAN}[Process ${stepNum}/${orderedNodes.length}]\${NC} Running \${BOLD}${rawName}\${NC} (v${version}) ${contextLabel}..."
 
-${envExports}${finalCmd}
-
-if [ $? -ne 0 ]; then
-  echo -e "\${RED}Error: Process Step ${stepNum} [${rawName}] failed with exit code $?. Aborting stack.\${NC}" >&2
-  exit 1
-fi
+${envExports}${runScript}
 
 echo -e "\${GREEN}✓\${NC} Completed step ${stepNum}: ${rawName}"
 `;

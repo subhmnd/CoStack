@@ -30,7 +30,9 @@ export default async function StackDefinitionPage({ params }: PageProps) {
     manifest = saved.manifestJson;
     jsonString = JSON.stringify(saved.manifestJson, null, 2);
     yamlString = saved.manifestYaml;
-    bashScript = saved.bashScript;
+    bashScript = saved.manifestJson?.nodes?.length
+      ? generateBashInstaller(saved.manifestJson)
+      : saved.bashScript;
   } else {
     // 2. Dynamic fallback
     const parts = slug.split("-");
