@@ -487,8 +487,13 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // Prioritize exact match on query
+  // Prioritize results with discovered installation scripts over generic package fallbacks
   results.sort((a, b) => {
+    const aHasScript = !a.command?.startsWith("$PKG_INSTALL");
+    const bHasScript = !b.command?.startsWith("$PKG_INSTALL");
+    if (aHasScript && !bHasScript) return -1;
+    if (!aHasScript && bHasScript) return 1;
+
     const aMatch = a.source.startsWith(queryClean) || a.name.toLowerCase() === query.toLowerCase();
     const bMatch = b.source.startsWith(queryClean) || b.name.toLowerCase() === query.toLowerCase();
     if (aMatch && !bMatch) return -1;
