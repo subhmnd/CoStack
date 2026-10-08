@@ -299,7 +299,83 @@ export async function GET(req: NextRequest) {
     }
   };
 
-  await Promise.allSettled([fetchDDGHtml(), fetchBing()]);
+  // 3. Query get.<domain> shortcuts (e.g. get.docker.com, get.k3s.io)
+  const fetchGetDomain = async () => {
+    const cleanQ = query.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (!cleanQ) return;
+    const tlds = ["com", "io", "sh", "net", "org", "dev", "app"];
+    await Promise.allSettled(
+      tlds.map(async (tld) => {
+        try {
+          const targetUrl = `https://get.${cleanQ}.${tld}/`;
+          const controller = new AbortController();
+          const tid = setTimeout(() => controller.abort(), 2000);
+          const res = await fetch(targetUrl, {
+            signal: controller.signal,
+            headers: { "User-Agent": "curl/8.1.0" },
+          });
+          clearTimeout(tid);
+          if (res.ok) {
+            const domain = `${cleanQ}.${tld}`;
+            rawCandidates.push({
+              title: `${cleanQ} Installer`,
+              projectKey: domain,
+              domain,
+              url: targetUrl,
+            });
+          }
+        } catch {}
+      })
+    );
+  };
+
+  // 4. Query GitHub Search API (find authoritative open-source scripts)
+  const fetchGitHubSearch = async () => {
+    try {
+      const cleanQ = query.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const ghUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(query + " install")}&sort=stars&order=desc&per_page=3`;
+      const res = await fetch(ghUrl, {
+        headers: {
+          "User-Agent": "CoStack-App",
+          Accept: "application/vnd.github.v3+json",
+        },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      for (const item of data.items || []) {
+        const projectKey = `github.com/${item.full_name.toLowerCase()}`;
+        rawCandidates.push({
+          title: item.name,
+          projectKey,
+          domain: "github.com",
+          url: item.html_url,
+        });
+
+        // Try raw script paths
+        const scriptNames = ["install.sh", `${cleanQ}-install.sh`, "setup.sh"];
+        for (const sName of scriptNames) {
+          const rawUrl = `https://raw.githubusercontent.com/${item.full_name}/master/${sName}`;
+          try {
+            const controller = new AbortController();
+            const tid = setTimeout(() => controller.abort(), 1500);
+            const headRes = await fetch(rawUrl, { signal: controller.signal, method: "HEAD" });
+            clearTimeout(tid);
+            if (headRes.ok) {
+              rawCandidates.push({
+                title: `${item.name} Installer`,
+                projectKey,
+                domain: "github.com",
+                url: rawUrl,
+              });
+              break;
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+  };
+
+  await Promise.allSettled([fetchDDGHtml(), fetchBing(), fetchGetDomain(), fetchGitHubSearch()]);
 
   // Group candidate URLs by software project / root domain
   const projectCandidatesMap = new Map<string, Candidate[]>();
