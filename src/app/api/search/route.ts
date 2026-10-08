@@ -11,7 +11,7 @@ export interface SearchResultItem {
 }
 
 const searchCache = new Map<string, { data: SearchResultItem[]; timestamp: number }>();
-const CACHE_TTL = 1000 * 60 * 30; // 30 mins
+const CACHE_TTL = 1000 * 60 * 5; // 5 mins
 
 // Exclude non-software domains (social media, consumer shopping, blog tutorials)
 const JUNK_KEYWORDS = [
@@ -76,6 +76,26 @@ function normalizeScriptUrl(url: string): string {
   return url;
 }
 
+function getProjectKey(urlStr: string): string {
+  try {
+    const u = new URL(urlStr);
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    const parts = host.split(".");
+    const rootDomain = /(?:co|com|org|net|gov|edu)\.[a-z]{2}$/i.test(host)
+      ? parts.slice(-3).join(".")
+      : parts.slice(-2).join(".");
+    if (rootDomain === "github.com") {
+      const pathParts = u.pathname.split("/").filter(Boolean);
+      if (pathParts.length >= 2) {
+        return `github.com/${pathParts[0].toLowerCase()}/${pathParts[1].toLowerCase()}`;
+      }
+    }
+    return rootDomain || host;
+  } catch {
+    return "unknown";
+  }
+}
+
 /**
  * Purely generic extraction of installer commands from webpage text.
  * No hardcoded software names or domains.
@@ -92,15 +112,27 @@ function extractGenericCommand(rawHtml: string, pageUrl: string): string | null 
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">");
 
+  // Check data-clipboard-text or class="command" (direct copy snippets provided by vendor)
+  const clipMatch =
+    text.match(/data-clipboard-text=["']([^"']*(?:curl|wget|bash|sh)[^"']*)["']/i) ||
+    text.match(/class=["'][^"']*command[^"']*["'][^>]*>([^<]*(?:curl|wget|bash|sh)[^<]*)<\/div>/i);
+  if (clipMatch) {
+    const cleanCmd = clipMatch[1].replace(/&amp;/g, "&").trim();
+    return normalizeScriptUrl(cleanCmd);
+  }
+
   // Check code / pre blocks first (authoritative on developer docs / github)
   const codeBlocks = text.match(/<(?:pre|code)[^>]*>([\s\S]*?)<\/(?:pre|code)>/gi) || [];
   for (const cb of codeBlocks) {
     const clean = cb.replace(/<[^>]+>/g, "").trim();
     if (
       (clean.includes("curl") || clean.includes("wget")) &&
-      (clean.includes(".sh") || clean.includes("|") || clean.includes("bash") || clean.includes("sh"))
+      (clean.includes(".sh") || clean.includes("|") || clean.includes("bash") || clean.includes("sh") || clean.includes("get."))
     ) {
-      const lines = clean.split("\n").map((l) => l.trim()).filter(Boolean);
+      const lines = clean
+        .split("\n")
+        .map((l) => l.replace(/^\$\s+/, "").trim())
+        .filter((l) => l && !l.includes("--dry-run"));
       let joined = lines.join(" && ");
       if (joined.includes("chmod +x") && !joined.includes("./")) {
         const shMatch = joined.match(/chmod\s+\+x\s+([^\s;&]+\.sh)/);
@@ -115,19 +147,19 @@ function extractGenericCommand(rawHtml: string, pageUrl: string): string | null 
   // Pipe pattern: curl/wget ... | [sudo] bash/sh
   const pipeMatch = text.match(/(?:curl|wget)\s+[^\n<`"'\$]+(?:\|\s*(?:sudo\s+)?(?:bash|sh))/i);
   if (pipeMatch) {
-    return normalizeScriptUrl(pipeMatch[0].replace(/<[^>]+>/g, "").trim());
+    return normalizeScriptUrl(pipeMatch[0].replace(/<[^>]+>/g, "").replace(/^\$\s+/, "").trim());
   }
 
   // Chained download + execute: curl/wget ... && [sudo] bash/sh ...
   const seqMatch = text.match(/(?:curl|wget)\s+[^\n<`"'\$]+(?:&&|;)\s*(?:sudo\s+)?(?:bash|sh)\s+[^\s<"';&]+/i);
   if (seqMatch) {
-    return normalizeScriptUrl(seqMatch[0].replace(/<[^>]+>/g, "").trim());
+    return normalizeScriptUrl(seqMatch[0].replace(/<[^>]+>/g, "").replace(/^\$\s+/, "").trim());
   }
 
   // Multi-line download and run: curl -o <name> -L <url> ... sh <name>
   const dlRunMatch = text.match(/curl\s+-[a-zA-Z]+\s+([a-zA-Z0-9_\.-]+)\s+-L\s+[^\s<"';&]+[\s\S]{1,100}?\bsh\s+\1/i);
   if (dlRunMatch) {
-    const lines = dlRunMatch[0].split("\n").map((l) => l.trim()).filter(Boolean);
+    const lines = dlRunMatch[0].split("\n").map((l) => l.replace(/^\$\s+/, "").trim()).filter(Boolean);
     return normalizeScriptUrl(lines.join(" && "));
   }
 
@@ -150,14 +182,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ results: [] });
   }
 
+  const noCache = req.nextUrl.searchParams.get("nocache") === "1" || req.nextUrl.searchParams.has("fresh");
   const cacheKey = query.toLowerCase();
   const cached = searchCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+  if (!noCache && cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return NextResponse.json({ results: cached.data });
   }
 
   interface Candidate {
     title: string;
+    projectKey: string;
     domain: string;
     url: string;
   }
@@ -198,7 +232,8 @@ export async function GET(req: NextRequest) {
 
           if (isJunkDomainOrTitle(domain, rawTitle)) continue;
 
-          rawCandidates.push({ title: rawTitle, domain, url: realUrl });
+          const projectKey = getProjectKey(realUrl);
+          rawCandidates.push({ title: rawTitle, projectKey, domain, url: realUrl });
         }
       }
     } catch (err) {
@@ -241,7 +276,8 @@ export async function GET(req: NextRequest) {
 
           if (isJunkDomainOrTitle(domain, rawTitle)) continue;
 
-          rawCandidates.push({ title: rawTitle, domain, url: realUrl });
+          const projectKey = getProjectKey(realUrl);
+          rawCandidates.push({ title: rawTitle, projectKey, domain, url: realUrl });
         }
       }
     } catch (err) {
@@ -251,43 +287,57 @@ export async function GET(req: NextRequest) {
 
   await Promise.allSettled([fetchDDGHtml(), fetchBing()]);
 
-  // Group candidate URLs by software domain / project
-  const domainCandidatesMap = new Map<string, Candidate[]>();
+  // Group candidate URLs by software project / root domain
+  const projectCandidatesMap = new Map<string, Candidate[]>();
   for (const c of rawCandidates) {
-    const list = domainCandidatesMap.get(c.domain) || [];
+    const list = projectCandidatesMap.get(c.projectKey) || [];
     list.push(c);
-    domainCandidatesMap.set(c.domain, list);
+    projectCandidatesMap.set(c.projectKey, list);
   }
+
+  // Sort project keys: prioritize project keys that match query
+  const queryClean = query.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const sortedProjectKeys = Array.from(projectCandidatesMap.keys()).sort((a, b) => {
+    const aClean = a.replace(/[^a-z0-9]/g, "");
+    const bClean = b.replace(/[^a-z0-9]/g, "");
+    const aMatch = aClean.startsWith(queryClean);
+    const bMatch = bClean.startsWith(queryClean);
+    if (aMatch && !bMatch) return -1;
+    if (!aMatch && bMatch) return 1;
+    return 0;
+  });
 
   // Scan top candidate pages dynamically to discover official scripts
   const results: SearchResultItem[] = [];
   const seenNames = new Set<string>();
 
-  for (const [domain, cList] of domainCandidatesMap.entries()) {
+  for (const projectKey of sortedProjectKeys) {
     if (results.length >= 4) break;
+    const cList = projectCandidatesMap.get(projectKey) || [];
 
-    // Sort candidates for this domain: prioritize URLs with .sh, download, install, setup, script, get.
+    // Sort candidates for this project: prioritize URLs with .sh, get., download, install, setup, script
     cList.sort((a, b) => {
       const aScore =
-        (a.url.endsWith(".sh") ? 10 : 0) +
-        (a.url.includes("install") || a.url.includes("download") || a.url.includes("get.") || a.url.includes("script") ? 5 : 0);
+        (a.url.endsWith(".sh") ? 15 : 0) +
+        (a.url.includes("get.") ? 8 : 0) +
+        (a.url.includes("install") || a.url.includes("download") || a.url.includes("script") ? 5 : 0);
       const bScore =
-        (b.url.endsWith(".sh") ? 10 : 0) +
-        (b.url.includes("install") || b.url.includes("download") || b.url.includes("get.") || b.url.includes("script") ? 5 : 0);
+        (b.url.endsWith(".sh") ? 15 : 0) +
+        (b.url.includes("get.") ? 8 : 0) +
+        (b.url.includes("install") || b.url.includes("download") || b.url.includes("script") ? 5 : 0);
       return bScore - aScore;
     });
 
     const primary = cList[0];
-    const queryClean = query.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const domainBase = domain.split(".")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+    const domainBase = primary.domain.split(".")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
 
     let cleanName = query.charAt(0).toUpperCase() + query.slice(1);
-    if (domainBase === queryClean || domain.startsWith(queryClean + ".")) {
+    if (domainBase === queryClean || primary.domain.startsWith(queryClean + ".")) {
       const m = primary.title.match(new RegExp(`\\b(${query})\\b`, "i"));
       cleanName = m ? m[0] : cleanName;
-    } else if (domain.includes("github.com")) {
+    } else if (projectKey.startsWith("github.com/")) {
       try {
-        const pathParts = new URL(primary.url).pathname.split("/").filter(Boolean);
+        const pathParts = projectKey.split("/").slice(1);
         if (pathParts.length >= 2) {
           cleanName = pathParts[1].replace(/[-_]/g, " ");
         }
@@ -308,7 +358,7 @@ export async function GET(req: NextRequest) {
     const vMatch = titleWithoutDistro.match(/v?(\d+\.\d+(\.\d+)?)/);
     const parsedVersion = vMatch ? vMatch[1] : "latest";
 
-    // Scan the candidate URLs for this domain to find the official script
+    // Scan the candidate URLs for this project to find the official script
     let foundScript = "";
     let bestUrl = primary.url;
 
@@ -344,20 +394,20 @@ export async function GET(req: NextRequest) {
     }
 
     const finalCmd = foundScript || `$PKG_INSTALL ${cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, "")}`;
+    const displayDomain = projectKey.startsWith("github.com/") ? projectKey : primary.domain;
 
     results.push({
-      id: domain.replace(/[^a-z0-9]/gi, "-"),
+      id: projectKey.replace(/[^a-z0-9]/gi, "-"),
       name: cleanName,
       version: parsedVersion,
       versions: Array.from(new Set([parsedVersion, "latest", "stable", "lts"])),
-      source: domain,
+      source: displayDomain,
       sourceUrl: bestUrl,
       command: finalCmd,
     });
   }
 
   // Prioritize exact match on query
-  const queryClean = query.toLowerCase().replace(/[^a-z0-9]/g, "");
   results.sort((a, b) => {
     const aMatch = a.source.startsWith(queryClean) || a.name.toLowerCase() === query.toLowerCase();
     const bMatch = b.source.startsWith(queryClean) || b.name.toLowerCase() === query.toLowerCase();
