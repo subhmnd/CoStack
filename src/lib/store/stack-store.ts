@@ -231,6 +231,7 @@ export const useStackStore = create<StackStore>((set, get) => ({
       nodes: updatedNodes,
       edges: newEdges,
       searchQuery: "",
+      selectedNodeId: nodeId,
     });
   },
 
@@ -308,6 +309,7 @@ export const useStackStore = create<StackStore>((set, get) => ({
       nodes: syncedNodes,
       edges: newEdges,
       searchQuery: "",
+      selectedNodeId: newNodes[0]?.id || null,
     });
   },
 
