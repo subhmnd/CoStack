@@ -226,8 +226,13 @@ export const useStackStore = create<StackStore>((set, get) => ({
     }
 
     const updatedNodes = syncProcessHierarchy([...get().nodes, newNode], newEdges);
+    const newSlug = updatedNodes
+      .map((n) => n.data.name.toLowerCase().replace(/[^a-z0-9_-]/g, ""))
+      .filter(Boolean)
+      .join("+");
 
     set({
+      slug: newSlug || generateStackSlug(),
       nodes: updatedNodes,
       edges: newEdges,
       searchQuery: "",
@@ -374,9 +379,15 @@ export const useStackStore = create<StackStore>((set, get) => ({
   deleteNode: (id: string) => {
     const remaining = get().nodes.filter((node) => node.id !== id);
     const remainingEdges = get().edges.filter((edge) => edge.source !== id && edge.target !== id);
+    const updatedNodes = syncProcessHierarchy(remaining, remainingEdges);
+    const newSlug = updatedNodes
+      .map((n) => n.data.name.toLowerCase().replace(/[^a-z0-9_-]/g, ""))
+      .filter(Boolean)
+      .join("+");
 
     set({
-      nodes: syncProcessHierarchy(remaining, remainingEdges),
+      slug: newSlug || generateStackSlug(),
+      nodes: updatedNodes,
       edges: remainingEdges,
       selectedNodeId: get().selectedNodeId === id ? null : get().selectedNodeId,
     });

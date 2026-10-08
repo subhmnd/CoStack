@@ -4,7 +4,7 @@ import { Navbar } from "@/components/layout/Navbar";
 import { getStackBySlug } from "@/lib/stack-service";
 import { generateStackManifest } from "@/lib/executor/manifest-generator";
 import { generateBashInstaller } from "@/lib/executor/bash-generator";
-import { createSoftwareNodeData } from "@/lib/stack-parser";
+import { createSoftwareNodeData, parseSlugToSoftware } from "@/lib/stack-parser";
 import { resolveSoftware } from "@/lib/search-resolver";
 import { StackViewerClient } from "./StackViewerClient";
 
@@ -52,18 +52,23 @@ export default async function StackDefinitionPage({ params }: PageProps) {
       : saved.bashScript;
   } else {
     // 2. Dynamic fallback
-    const parts = slug.split("-");
-    const rawNames = parts.length > 1 ? parts.slice(0, -1) : parts;
+    const parsedItems = parseSlugToSoftware(slug);
 
     const nodes = await Promise.all(
-      rawNames.map(async (name, i) => {
-        const data = createSoftwareNodeData(name);
+      parsedItems.map(async (item, i) => {
+        const data = createSoftwareNodeData(item.name, item.version || "latest");
         try {
-          const res = await resolveSoftware(name);
+          const res = await resolveSoftware(item.name);
           if (res.length > 0 && res[0].command) {
             data.command = res[0].command;
             data.source = res[0].source || data.source;
             data.sourceUrl = res[0].sourceUrl || data.sourceUrl;
+            if (!item.version && res[0].version) {
+              data.version = res[0].version;
+            }
+            if (res[0].versions) {
+              data.versions = res[0].versions;
+            }
           }
         } catch {}
 

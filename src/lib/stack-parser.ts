@@ -58,3 +58,36 @@ export function createSoftwareNodeData(
     autoConfirm: true,
   };
 }
+
+export interface ParsedSoftwareItem {
+  name: string;
+  version?: string;
+}
+
+export function parseSlugToSoftware(slug: string): ParsedSoftwareItem[] {
+  let items: string[] = [];
+
+  if (slug.includes("+")) {
+    items = slug.split("+").map(decodeURIComponent).filter(Boolean);
+  } else if (slug.includes(",")) {
+    items = slug.split(",").map(decodeURIComponent).filter(Boolean);
+  } else if (slug.includes("_")) {
+    items = slug.split("_").map(decodeURIComponent).filter(Boolean);
+  } else {
+    const parts = slug.split("-").map(decodeURIComponent).filter(Boolean);
+    // If the last part is a random nanoid hash (6 alphanumeric characters) and there are previous parts, strip the hash
+    if (parts.length > 1 && /^[2-9a-km-z]{6}$/i.test(parts[parts.length - 1])) {
+      items = parts.slice(0, -1);
+    } else {
+      items = parts;
+    }
+  }
+
+  return items.map((raw) => {
+    const [name, version] = raw.split(/[@:]/);
+    return {
+      name: name.trim(),
+      version: version ? version.trim() : undefined,
+    };
+  });
+}
