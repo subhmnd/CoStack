@@ -172,11 +172,25 @@ CYAN='\\033[0;36m'
 BOLD='\\033[1m'
 NC='\\033[0m'
 
-echo -e "\${PURPLE}┌───────────────────────────────────────────────┐\${NC}"
-echo -e "\${PURPLE}│\${NC}  \${BOLD}Co.Stack Multi-Script Runner\${NC}                 \${PURPLE}│\${NC}"
-echo -e "\${PURPLE}│\${NC}  Stack: \${CYAN}${manifest.name}\${NC}                      \${PURPLE}│\${NC}"
-echo -e "\${PURPLE}│\${NC}  Slug : \${YELLOW}${manifest.slug}\${NC}                  \${PURPLE}│\${NC}"
-echo -e "\${PURPLE}└───────────────────────────────────────────────┘\${NC}"
+BOX_WIDTH=47
+BORDER_TOP="┌$(printf '─%.0s' $(seq 1 \$BOX_WIDTH))┐"
+BORDER_BOT="└$(printf '─%.0s' $(seq 1 \$BOX_WIDTH))┘"
+
+print_box_line() {
+  local content="\$1"
+  local raw="\$2"
+  local raw_len=\${#raw}
+  local pad=\$((BOX_WIDTH - raw_len - 2))
+  if [ \$pad -lt 0 ]; then pad=0; fi
+  local spaces=$(printf '%*s' "\$pad" '')
+  echo -e "\${PURPLE}│\${NC}  \${content}\${spaces}\${PURPLE}│\${NC}"
+}
+
+echo -e "\${PURPLE}\${BORDER_TOP}\${NC}"
+print_box_line "\${BOLD}Co.Stack - Run Scripts easily\${NC}" "Co.Stack - Run Scripts easily"
+print_box_line "Stack: \${CYAN}${manifest.name}\${NC}" "Stack: ${manifest.name}"
+print_box_line "Slug : \${YELLOW}${manifest.slug}\${NC}" "Slug : ${manifest.slug}"
+echo -e "\${PURPLE}\${BORDER_BOT}\${NC}"
 
 # Check for root / administrative privileges
 if [ "\$(id -u)" -ne 0 ]; then
