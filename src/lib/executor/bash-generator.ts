@@ -56,13 +56,7 @@ export function generateBashInstaller(manifest: CoStackManifest): string {
         execCmd = `${execCmd} ${customArgs}`;
       }
 
-      // If parent is container runtime and command isn't already a docker command, auto-wrap or run
-      if (parentIsContainer && parentSlug && !execCmd.startsWith("docker") && !execCmd.startsWith("podman")) {
-        const escapedSubCmd = execCmd.replace(/"/g, '\\"');
-        execCmd = `if docker ps -q -f name="^${parentSlug}$" 2>/dev/null | grep -q .; then docker exec -i "${parentSlug}" sh -c "${escapedSubCmd}"; else (${execCmd}); fi`;
-      }
-
-      // Build execution block: handle piped scripts (curl/wget | bash) cleanly with auto-confirm
+      // Build execution block: handle piped scripts (curl/wget | bash) cleanly with auto-confirm via temp file
       let runScript = "";
       const curlPipeMatch = execCmd.match(/^(?:sudo\s+)?curl\s+([^\n|]+?)\s*\|\s*(?:sudo\s+)?(?:bash|sh)(.*)$/i);
       const wgetPipeMatch = execCmd.match(/^(?:sudo\s+)?wget\s+([^\n|]+?)\s*\|\s*(?:sudo\s+)?(?:bash|sh)(.*)$/i);
@@ -70,11 +64,23 @@ export function generateBashInstaller(manifest: CoStackManifest): string {
       if (curlPipeMatch) {
         const curlArgs = curlPipeMatch[1].trim();
         const bashSuffix = curlPipeMatch[2].trim();
+        const execBlock = parentIsContainer && parentSlug && !execCmd.startsWith("docker")
+          ? `if docker ps -q -f name="^${parentSlug}$" 2>/dev/null | grep -q .; then
+  docker cp "\$_STEP_TMP" "${parentSlug}:/tmp/step.sh"
+  ${autoConfirm ? `(set +o pipefail; yes 2>/dev/null | docker exec -i "${parentSlug}" bash /tmp/step.sh ${bashSuffix}) || _STEP_STATUS=\$?` : `docker exec -i "${parentSlug}" bash /tmp/step.sh ${bashSuffix} || _STEP_STATUS=\$?`}
+  docker exec "${parentSlug}" rm -f /tmp/step.sh 2>/dev/null || true
+else
+  ${autoConfirm ? `(set +o pipefail; yes 2>/dev/null | bash "\$_STEP_TMP" ${bashSuffix}) || _STEP_STATUS=\$?` : `bash "\$_STEP_TMP" ${bashSuffix} || _STEP_STATUS=\$?`}
+fi`
+          : (autoConfirm
+              ? `(set +o pipefail; yes 2>/dev/null | bash "\$_STEP_TMP" ${bashSuffix}) || _STEP_STATUS=\$?`
+              : `bash "\$_STEP_TMP" ${bashSuffix} || _STEP_STATUS=\$?`);
+
         runScript = `_STEP_TMP=\$(mktemp /tmp/costack_XXXXXX.sh)
 curl ${curlArgs} -o "\$_STEP_TMP"
 chmod +x "\$_STEP_TMP"
 _STEP_STATUS=0
-${autoConfirm ? `(set +o pipefail; yes 2>/dev/null | bash "\$_STEP_TMP" ${bashSuffix}) || _STEP_STATUS=\$?` : `bash "\$_STEP_TMP" ${bashSuffix} || _STEP_STATUS=\$?`}
+${execBlock}
 rm -f "\$_STEP_TMP"
 if [ \$_STEP_STATUS -ne 0 ]; then
   echo -e "\${RED}Error: Process Step ${stepNum} [${rawName}] failed with exit code \$_STEP_STATUS. Aborting stack.\${NC}" >&2
@@ -83,17 +89,35 @@ fi`;
       } else if (wgetPipeMatch) {
         const wgetArgs = wgetPipeMatch[1].replace(/-O\s*-|-qO-/i, "").trim();
         const bashSuffix = wgetPipeMatch[2].trim();
+        const execBlock = parentIsContainer && parentSlug && !execCmd.startsWith("docker")
+          ? `if docker ps -q -f name="^${parentSlug}$" 2>/dev/null | grep -q .; then
+  docker cp "\$_STEP_TMP" "${parentSlug}:/tmp/step.sh"
+  ${autoConfirm ? `(set +o pipefail; yes 2>/dev/null | docker exec -i "${parentSlug}" bash /tmp/step.sh ${bashSuffix}) || _STEP_STATUS=\$?` : `docker exec -i "${parentSlug}" bash /tmp/step.sh ${bashSuffix} || _STEP_STATUS=\$?`}
+  docker exec "${parentSlug}" rm -f /tmp/step.sh 2>/dev/null || true
+else
+  ${autoConfirm ? `(set +o pipefail; yes 2>/dev/null | bash "\$_STEP_TMP" ${bashSuffix}) || _STEP_STATUS=\$?` : `bash "\$_STEP_TMP" ${bashSuffix} || _STEP_STATUS=\$?`}
+fi`
+          : (autoConfirm
+              ? `(set +o pipefail; yes 2>/dev/null | bash "\$_STEP_TMP" ${bashSuffix}) || _STEP_STATUS=\$?`
+              : `bash "\$_STEP_TMP" ${bashSuffix} || _STEP_STATUS=\$?`);
+
         runScript = `_STEP_TMP=\$(mktemp /tmp/costack_XXXXXX.sh)
 wget ${wgetArgs} -O "\$_STEP_TMP"
 chmod +x "\$_STEP_TMP"
 _STEP_STATUS=0
-${autoConfirm ? `(set +o pipefail; yes 2>/dev/null | bash "\$_STEP_TMP" ${bashSuffix}) || _STEP_STATUS=\$?` : `bash "\$_STEP_TMP" ${bashSuffix} || _STEP_STATUS=\$?`}
+${execBlock}
 rm -f "\$_STEP_TMP"
 if [ \$_STEP_STATUS -ne 0 ]; then
   echo -e "\${RED}Error: Process Step ${stepNum} [${rawName}] failed with exit code \$_STEP_STATUS. Aborting stack.\${NC}" >&2
   exit 1
 fi`;
       } else {
+        // If parent is container runtime and command isn't already a docker command, auto-wrap or run
+        if (parentIsContainer && parentSlug && !execCmd.startsWith("docker") && !execCmd.startsWith("podman")) {
+          const escapedSubCmd = execCmd.replace(/"/g, '\\"');
+          execCmd = `if docker ps -q -f name="^${parentSlug}$" 2>/dev/null | grep -q .; then docker exec -i "${parentSlug}" sh -c "${escapedSubCmd}"; else (${execCmd}); fi`;
+        }
+
         if (autoConfirm && !execCmd.includes("-y") && !execCmd.includes("yes")) {
           runScript = `_STEP_STATUS=0
 (set +o pipefail; yes 2>/dev/null | (${execCmd})) || _STEP_STATUS=\$?
